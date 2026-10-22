@@ -191,13 +191,13 @@ const uColor = gl.getUniformLocation(program, 'uColor');
 //    ground plane (y = 0), centered on the origin.
 // ---------------------------------------------------------------------
 // const GRID_SIZE = 1000;   //bigger
-const GRID_SIZE = 40;          // image is resampled to 40×40 → 1,600 cubes
+const GRID_SIZE = 90;          // image is resampled to 40×40 → 1,600 cubes
 const SPACING = 1.0;
 const imageURL = "https://lh3.googleusercontent.com/A0ukoBn7M8k_AjZ8MOC7bH0qHOUHWTuHP2co1Jxr97WsGQA0En5RqQn8OK48JQJYsdcNnTh-ayE6ScqlpQ5y80oxS5LvJUhJRmB3Y5kGxSRti_ZHH0rtIecRCrFhopc2Tdb0p3BkxZ-b1scNUg";
 
 let cubes = [];
 function isSky(r, g, b){
-  return r > 110 && b - r > 25;
+  return r > 100 && b - r > 20;
 }
 
 function generateMapsFromImage(imageSrc, size) {
@@ -222,7 +222,7 @@ function generateMapsFromImage(imageSrc, size) {
           cRow.push([r / 255, g / 255, b / 255]);       // ready for uniform3fv
           rawRow.push([r,g,b]);
         }
-        heightMap.push(hRow); colorMap.push(cRow);
+        heightMap.push(hRow); colorMap.push(cRow); rawMap.push(rawRow);
       }
       resolve({ heightMap, colorMap, rawMap });
     };
@@ -238,7 +238,7 @@ generateMapsFromImage(imageURL, GRID_SIZE)
     for (let row = 0; row < GRID_SIZE; row++) {
       for (let col = 0; col < GRID_SIZE; col++) {
         const [r,g,b] = rawMap[row][col];
-        if(isSky(r,g,b)) continue;
+        //if(isSky(r,g,b)) continue;
         
         cubes.push({
           x: (col - (GRID_SIZE - 1) / 2) * SPACING,
@@ -403,7 +403,8 @@ function draw() {
   //
   // (The `false` argument means "don't transpose the matrix".
   // WebGL requires it to be false.)
-  gl.uniformMatrix4fv(uView, false, lookAt([dist * 0.8, dist * 0.8, dist], [0, 0, 0], [0, 1, 0]));
+  gl.uniformMatrix4fv(uView, false, lookAt([GRID_SIZE * 0.6, GRID_SIZE * 0.6, GRID_SIZE * 1.4],
+    [0, GRID_SIZE / 2, 0], [0, 1, 0]));
 
   // --- d. Draw every cube -------------------------------------------
   // Draw every cube: same triangles each time, different uniforms.
@@ -415,7 +416,7 @@ function draw() {
     // sits at y = 0, so stretching it makes it grow upward.
     const model = multiply(
       translation(cube.x, cube.y, cube.z),
-      scaling(1, 1, cube.depth),
+      scaling(1, 1, cube.height),
     );
 
     // Send this cube's uniforms to the shaders. They stay set until we
