@@ -191,19 +191,16 @@ const uColor = gl.getUniformLocation(program, 'uColor');
 //    ground plane (y = 0), centered on the origin.
 // ---------------------------------------------------------------------
 // const GRID_SIZE = 1000;   //bigger
-const GRID_SIZE = 90;          // image is resampled to 40×40 → 1,600 cubes
+const GRID_SIZE = 120;          // image is resampled to 40×40 → 1,600 cubes
 const SPACING = 1.0;
-const imageURL = "https://lh3.googleusercontent.com/A0ukoBn7M8k_AjZ8MOC7bH0qHOUHWTuHP2co1Jxr97WsGQA0En5RqQn8OK48JQJYsdcNnTh-ayE6ScqlpQ5y80oxS5LvJUhJRmB3Y5kGxSRti_ZHH0rtIecRCrFhopc2Tdb0p3BkxZ-b1scNUg";
 
+
+const HEIGHT_SCALE = 15;
 let cubes = [];
-function isSky(r, g, b){
-  return r > 100 && b - r > 20;
-}
 
 function generateMapsFromImage(imageSrc, size) {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = "anonymous";
     img.onload = () => {
       const c = document.createElement("canvas");
       c.width = size;
@@ -212,47 +209,45 @@ function generateMapsFromImage(imageSrc, size) {
       ctx.drawImage(img, 0, 0, size, size);          // downsample
       const data = ctx.getImageData(0, 0, size, size).data;
 
-      const heightMap = [], colorMap = [], rawMap = [];
+      const heightMap = [], colorMap = [];
       for (let y = 0; y < size; y++) {
-        const hRow = [], cRow = [], rawRow = [];
+        const hRow = [], cRow = [];
         for (let x = 0; x < size; x++) {
           const i = (y * size + x) * 4;
           const r = data[i], g = data[i + 1], b = data[i + 2];
-          hRow.push(0.299 * r + 0.587 * g + 0.114 * b);  // 0..255
-          cRow.push([r / 255, g / 255, b / 255]);       // ready for uniform3fv
-          rawRow.push([r,g,b]);
+          hRow.push(0.299 * r + 0.587 * g + 0.114 * b);
+          cRow.push([r / 255, g / 255, b / 255]);
         }
-        heightMap.push(hRow); colorMap.push(cRow); rawMap.push(rawRow);
+        heightMap.push(hRow);
+        colorMap.push(cRow);
       }
-      resolve({ heightMap, colorMap, rawMap });
+      resolve({ heightMap, colorMap });
     };
     img.onerror = () => reject(new Error("Failed to load image: " + imageSrc));
     img.src = imageSrc;
   });
 }
 
-generateMapsFromImage(imageURL, GRID_SIZE)
-  .then(({ heightMap, colorMap, rawMap }) => {
-    cubes = [];
-
-    for (let row = 0; row < GRID_SIZE; row++) {
-      for (let col = 0; col < GRID_SIZE; col++) {
-        const [r,g,b] = rawMap[row][col];
-        //if(isSky(r,g,b)) continue;
-        
-        cubes.push({
-          x: (col - (GRID_SIZE - 1) / 2) * SPACING,
-          y: GRID_SIZE - row,
-          z: 0,
-          height: 0.5 + (heightMap[row][col] / 255) * 6,  // 0.5 to 4.5
-          color: colorMap[row][col],
-        });
-      }
+// Load BOTH images, then build the grid:
+// colors from the color image, heights from the height map.
+Promise.all([
+  generateMapsFromImage("wavecolor.png", GRID_SIZE),
+  generateMapsFromImage("waveheight.png", GRID_SIZE),
+]).then(([colorImg, heightImg]) => {
+  cubes = [];
+  for (let row = 0; row < GRID_SIZE; row++) {
+    for (let col = 0; col < GRID_SIZE; col++) {
+      cubes.push({
+        x: (col - (GRID_SIZE - 1) / 2) * SPACING,
+        z: (row - (GRID_SIZE - 1) / 2) * SPACING,
+        height: 0.5 + (heightImg.heightMap[row][col] / 255) * HEIGHT_SCALE,
+        color: colorImg.colorMap[row][col],
+      });
     }
-    draw();
-  })
-  .catch(console.error);
-
+  }
+  console.log("cubes:", cubes.length);
+  draw();
+}).catch(console.error);
 
 // ---------------------------------------------------------------------
 // 4. MATRIX HELPERS
@@ -403,8 +398,9 @@ function draw() {
   //
   // (The `false` argument means "don't transpose the matrix".
   // WebGL requires it to be false.)
-  gl.uniformMatrix4fv(uView, false, lookAt([GRID_SIZE * 0.6, GRID_SIZE * 0.6, GRID_SIZE * 1.4],
-    [0, GRID_SIZE / 2, 0], [0, 1, 0]));
+  gl.uniformMatrix4fv(uView, false, lookAt(
+    [GRID_SIZE * 0.8, GRID_SIZE * 0.8, GRID_SIZE * 1.0],
+    [0, 0, 0], [0, 1, 0]));
 
   // --- d. Draw every cube -------------------------------------------
   // Draw every cube: same triangles each time, different uniforms.
@@ -415,8 +411,8 @@ function draw() {
     // y stays 0 in the translation because the cube's bottom already
     // sits at y = 0, so stretching it makes it grow upward.
     const model = multiply(
-      translation(cube.x, cube.y, cube.z),
-      scaling(1, 1, cube.height),
+      translation(cube.x, 0, cube.z),
+      scaling(1, cube.height, 1),
     );
 
     // Send this cube's uniforms to the shaders. They stay set until we
