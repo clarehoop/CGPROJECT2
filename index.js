@@ -191,11 +191,11 @@ const uColor = gl.getUniformLocation(program, 'uColor');
 //    ground plane (y = 0), centered on the origin.
 // ---------------------------------------------------------------------
 // const GRID_SIZE = 1000;   //bigger
-const GRID_SIZE = 120;          // image is resampled to 40×40 → 1,600 cubes
+const GRID_SIZE = 3000;  
 const SPACING = 1.0;
 
 
-const HEIGHT_SCALE = 15;
+const HEIGHT_SCALE = 8;
 let cubes = [];
 
 function generateMapsFromImage(imageSrc, size) {
@@ -231,8 +231,8 @@ function generateMapsFromImage(imageSrc, size) {
 // Load BOTH images, then build the grid:
 // colors from the color image, heights from the height map.
 Promise.all([
-  generateMapsFromImage("wavecolor.png", GRID_SIZE),
-  generateMapsFromImage("waveheight.png", GRID_SIZE),
+  generateMapsFromImage("wave2.png", GRID_SIZE),
+  generateMapsFromImage("wave2.png", GRID_SIZE),
 ]).then(([colorImg, heightImg]) => {
   cubes = [];
   for (let row = 0; row < GRID_SIZE; row++) {
