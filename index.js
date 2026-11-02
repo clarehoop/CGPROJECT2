@@ -1,32 +1,48 @@
 'use strict';
 // =====================================================================
-// CUBE WORLD: OCEAN IN MOTION
-// Everything on screen is the SAME cube model, moved (translated),
-// stretched (scaled) and turned (rotated) into place with 4x4 matrices.
+// CUBE WORLD: Ocean Waves
+// Built using cube model that is translated and scaled
 //
-// File map:
-//   1. WebGL setup + shaders
-//   2. The one cube model
-//   3. CubeBatch: a list of cubes drawn in a single draw call
-//   4. Matrix helpers (translation, scaling, rotation, camera)
-//   5. Bézier curve helpers
-//   6. Level 1: procedural landscape
-//   7. Level 2: landscape sampled from images
-//   8. Level 3: Bézier waves + Bézier clouds
-//   9. Level 4: lighting, skybox, fog, boat, gulls, storm
-//  10. Camera (orbit + mouse)
-//  11. The render loop
-//  12. User interface wiring
+// what's in this file (in order):
+//   webgl setup + shaders
+//   the cube model
+//   cubebatch (draws lots of cubes in one draw call)
+//   matrix helpers
+//   bezier curves
+//   level 0 + level 1 (single cube, random grid)
+//   level 2 (landscape from wave2.png)
+//   level 3 (bezier waves + bezier clouds)
+//   level 4 (lighting, skybox, fog, boat, gulls, storm)
+//   camera
+//   level descriptions for the side panel
+//   render loop
+//   user interface
+//
+// code sources
+// I started from two examples we were given in class:
+//   webgl-cubes-v2 - grid of cubes with random heights and colors
+//                    (cube with bottom at y = 0, normals, matrix helpers,
+//                    grid layout, simple diffuse lighting)
+//   camera-move    - camera orbiting a scene (lookAt on a circle,
+//                    animation loop, resizeCanvas, face shading)
+// tags I use in the comments:
+//   [REUSED]  taken from a class example, little or no change
+//   [CHANGED] based on a class example but I changed it
+//   [NEW]     I wrote it for this project
 // =====================================================================
 
 
 //WEB GL Setup 
+// [REUSED] getting the canvas + webgl context is from both class examples
+// (the id "glcanvas" is from camera-move)
+
+// [CHANGED] I turned on antialiasing so the cube edges are smoother
 const canvas = document.getElementById('glcanvas');
 const gl = canvas.getContext('webgl', { antialias: true });
 
-// "Instancing" lets us draw thousands of copies of the cube with ONE draw
-// call. Each copy ("instance") gets its own position, size and colors.
-// Drawing 40,000 cubes one call at a time would be far too slow.
+
+// [NEW] The class examples call drawArrays once per cube, but I am introducing instancing for performance issues
+// when drawing >40,000 cubes
 const instancing = gl && gl.getExtension('ANGLE_instanced_arrays');
 if (!gl || !instancing) {
   document.getElementById('status').hidden = false;
@@ -34,23 +50,37 @@ if (!gl || !instancing) {
   throw new Error('WebGL instancing not available');
 }
 
-//Write the Vertex and fragment shader setups for WEBGL
+
+// VERTEX SHADER
+//
+// [REUSED] from camera-move: the a_/u_/v_ naming, the u_model / u_view /
+//   u_projection uniforms, and the line projection * view * model * position
+//
+// [REUSED] from webgl-cubes-v2: the a_normal attribute for each face
+//
+// [CHANGED] camera-move stored a fixed brightness per face in a buffer
+//   (cubeShades). Here the same idea (v_faceShade) is worked out from the normal
+//
+// [NEW] attributes per-instance (a_offset, a_scale, a_rotY, a_colorBottom,
+//   a_colorTop), the rotateY helper, normals divided by the scale, and the
+//   bottom/top vertex color blend (the examples used one u_color per cube)
+//
 const vertexShaderSource = `
-  // ---- Per-vertex inputs: the corners of the one cube model ----
-  attribute vec3 a_position;   // corner position, cube spans x,z in [-0.5,0.5], y in [0,1]
-  attribute vec3 a_normal;     // direction the face points (for lighting)
+  // per vertex: the corners of the cube model
+  attribute vec3 a_position;   // corner position, cube goes from -0.5 to 0.5 in x and z, 0 to 1 in y
+  attribute vec3 a_normal;     // which way the face points (for lighting)
 
-  // ---- Per-instance inputs: one set per cube copy ----
-  attribute vec3  a_offset;      // TRANSLATION: where this cube goes
-  attribute vec3  a_scale;       // SCALING: how wide / tall / deep it is
-  attribute vec3  a_colorBottom; // color of the 4 bottom corners
-  attribute vec3  a_colorTop;    // color of the 4 top corners
-  attribute float a_rotY;        // ROTATION around the y axis (radians)
+  // per instance: one set for each cube copy
+  attribute vec3  a_offset;      // translation - where the cube goes
+  attribute vec3  a_scale;       // scaling - how wide / tall / deep
+  attribute vec3  a_colorBottom; // color of the bottom 4 corners
+  attribute vec3  a_colorTop;    // color of the top 4 corners
+  attribute float a_rotY;        // rotation around y (radians)
 
-  // ---- Same for the whole draw call ----
-  uniform mat4 u_model;       // extra object transform (e.g. a whole cloud or boat)
-  uniform mat4 u_view;        // world space  -> camera space  (the camera)
-  uniform mat4 u_projection;  // camera space -> clip space    (perspective)
+  // same for the whole draw call
+  uniform mat4 u_model;       // moves a whole object, like a cloud or the boat
+  uniform mat4 u_view;        // world -> camera (the camera)
+  uniform mat4 u_projection;  // camera -> clip space (perspective)
 
   varying vec3  v_color;
   varying vec3  v_normal;
@@ -64,30 +94,40 @@ const vertexShaderSource = `
   }
 
   void main() {
-    // Instance transform: scale first, then rotate, then translate.
+    // scale first, then rotate, then translate
     vec3 local = rotateY(a_position * a_scale, a_rotY) + a_offset;
 
-    // Then the object (model), camera (view) and lens (projection) transforms.
+    // then model, view and projection like in the class examples
     vec4 world = u_model * vec4(local, 1.0);
     v_worldPos = world.xyz;
     gl_Position = u_projection * u_view * world;
 
-    // Normals must be divided by the scale (not multiplied) to stay
-    // perpendicular to stretched faces (the "inverse transpose" rule).
+    // I divide normals by the scale (not multiply) so they stay
+    // perpendicular when a cube gets stretched (inverse transpose rule)
     vec3 n = rotateY(a_normal / a_scale, a_rotY);
     v_normal = (u_model * vec4(n, 0.0)).xyz;
 
-    // a_position.y is 0 on bottom corners and 1 on top corners, so this picks
-    // the bottom color or the top color. The GPU then INTERPOLATES (blends)
-    // between them across every face, giving a smooth vertical gradient.
+    // a_position.y is 0 on the bottom corners and 1 on the top ones so this
+    // picks bottom or top color, then the gpu interpolates between them
+    // across each face which gives the gradient
     v_color = mix(a_colorBottom, a_colorTop, a_position.y);
 
-    // Cheap stand-in for lighting, used when real lighting is off:
-    // each face gets a fixed brightness so the cube still looks 3D.
+    // fake lighting for when real lighting is off, each face gets
+    // its own brightness so the cube still looks 3d
     v_faceShade = a_normal.y > 0.5 ? 1.0 : (a_normal.y < -0.5 ? 0.45 : (abs(a_normal.x) > 0.5 ? 0.8 : 0.65));
   }
 `;
 
+// FRAGMENT SHADER
+//
+// [CHANGED] webgl-cubes-v2 had simple lighting: brightness = max(dot(N, L), 0)
+//   plus 30% ambient, with a fixed light direction. That diffuse term is kept,
+//   but the light direction, color and ambient are now uniforms (for the sun
+//   and moon in Level 4)
+//
+// [NEW] specular highlights (Blinn-Phong), distance fog, "emissive" for the
+//   sky and sun, and a color tint (grey storm clouds)
+//
 const fragmentShaderSource = `
   #ifdef GL_FRAGMENT_PRECISION_HIGH
     precision highp float;
@@ -100,14 +140,14 @@ const fragmentShaderSource = `
   varying vec3  v_worldPos;
   varying float v_faceShade;
 
-  uniform float u_emissive;   // 1 = glows on its own (sky, sun): ignore lighting
-  uniform float u_lighting;   // 1 = use sun lighting, 0 = use face shade
-  uniform float u_fog;        // 1 = blend toward fog color with distance
-  uniform float u_specular;   // strength of shiny highlights
-  uniform vec3  u_tint;       // multiplies the color (e.g. grey storm clouds)
-  uniform vec3  u_lightDir;   // direction TOWARD the sun (or moon)
+  uniform float u_emissive;   // 1 = glows on its own (sky, sun), no lighting
+  uniform float u_lighting;   // 1 = sun lighting, 0 = face shade
+  uniform float u_fog;        // 1 = fade to fog color with distance
+  uniform float u_specular;   // how shiny
+  uniform vec3  u_tint;       // multiplies the color (grey storm clouds)
+  uniform vec3  u_lightDir;   // direction toward the sun (or moon)
   uniform vec3  u_lightColor;
-  uniform vec3  u_ambient;    // light that comes from everywhere (sky bounce)
+  uniform vec3  u_ambient;    // light from everywhere
   uniform vec3  u_fogColor;
   uniform float u_fogDensity;
   uniform vec3  u_cameraPos;
@@ -119,12 +159,12 @@ const fragmentShaderSource = `
     if (u_emissive > 0.5) {
       color = base;
     } else if (u_lighting > 0.5) {
-      // Blinn-Phong lighting
+      // blinn-phong lighting
       vec3 N = normalize(v_normal);
       vec3 L = normalize(u_lightDir);
       vec3 V = normalize(u_cameraPos - v_worldPos);
-      float diffuse = max(dot(N, L), 0.0);        // Lambert: faces toward the sun are brighter
-      vec3 H = normalize(L + V);                  // halfway vector
+      float diffuse = max(dot(N, L), 0.0);        // faces pointing at the sun are brighter
+      vec3 H = normalize(L + V);                  // halfway vector for the highlight
       float spec = diffuse > 0.0 ? pow(max(dot(N, H), 0.0), 48.0) * u_specular : 0.0;
       color = base * (u_ambient + u_lightColor * diffuse) + u_lightColor * spec;
     } else {
@@ -132,7 +172,7 @@ const fragmentShaderSource = `
     }
 
     if (u_fog > 0.5) {
-      // Exponential-squared fog: far things fade into the fog color.
+      // exponential fog, far away things fade into the fog color
       float d = length(v_worldPos - u_cameraPos);
       float f = 1.0 - exp(-pow(d * u_fogDensity, 2.0));
       color = mix(color, u_fogColor, clamp(f, 0.0, 1.0));
@@ -141,7 +181,10 @@ const fragmentShaderSource = `
     gl_FragColor = vec4(color, 1.0);
   }
 `;
-
+// webgl reqs
+// [REUSED] compileShader is from webgl-cubes-v2 (throws on a GLSL error)
+// [REUSED] checking LINK_STATUS after linking is from camera-move
+//
 function compileShader(type, source) {
   const shader = gl.createShader(type);
   gl.shaderSource(shader, source);
@@ -161,7 +204,9 @@ if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
 }
 gl.useProgram(program);
 
-// Look up every attribute and uniform once.
+// look up every attribute and uniform once
+// [CHANGED] the examples looked up each location on its own line, now
+// a loop stores them in the attr and uni objects
 const attr = {};
 for (const name of ['a_position', 'a_normal', 'a_offset', 'a_scale', 'a_colorBottom', 'a_colorTop', 'a_rotY']) {
   attr[name] = gl.getAttribLocation(program, name);
@@ -173,30 +218,26 @@ for (const name of ['u_model', 'u_view', 'u_projection', 'u_emissive', 'u_lighti
 }
 
 
-// =====================================================================
-// 2. THE ONE CUBE MODEL
-//    A unit cube: x and z from -0.5 to 0.5, y from 0 to 1.
-//    Its bottom sits on y = 0, so scaling in y makes it grow UPWARD.
-//    6 faces × 2 triangles × 3 corners = 36 vertices.
-//    Each vertex: position (x, y, z) then normal (nx, ny, nz).
-// =====================================================================
+
+// the cube model
+// [REUSED] These 36 vertices and the buffer layout are copied from webgl-cubes-v2
 const cubeVertices = new Float32Array([
-  // Front (+z)
+  // front (+z)
   -0.5, 0, 0.5,  0, 0, 1,    0.5, 0, 0.5,  0, 0, 1,    0.5, 1, 0.5,  0, 0, 1,
   -0.5, 0, 0.5,  0, 0, 1,    0.5, 1, 0.5,  0, 0, 1,   -0.5, 1, 0.5,  0, 0, 1,
-  // Back (-z)
+  // back (-z)
   -0.5, 0, -0.5, 0, 0, -1,   0.5, 1, -0.5, 0, 0, -1,   0.5, 0, -0.5, 0, 0, -1,
   -0.5, 0, -0.5, 0, 0, -1,  -0.5, 1, -0.5, 0, 0, -1,   0.5, 1, -0.5, 0, 0, -1,
-  // Top (+y)
+  // top (+y)
   -0.5, 1, -0.5, 0, 1, 0,   -0.5, 1, 0.5,  0, 1, 0,    0.5, 1, 0.5,  0, 1, 0,
   -0.5, 1, -0.5, 0, 1, 0,    0.5, 1, 0.5,  0, 1, 0,    0.5, 1, -0.5, 0, 1, 0,
-  // Bottom (-y)
+  // bottom (-y)
   -0.5, 0, -0.5, 0, -1, 0,   0.5, 0, 0.5,  0, -1, 0,  -0.5, 0, 0.5,  0, -1, 0,
   -0.5, 0, -0.5, 0, -1, 0,   0.5, 0, -0.5, 0, -1, 0,   0.5, 0, 0.5,  0, -1, 0,
-  // Right (+x)
+  // right (+x)
    0.5, 0, -0.5, 1, 0, 0,    0.5, 1, -0.5, 1, 0, 0,    0.5, 1, 0.5,  1, 0, 0,
    0.5, 0, -0.5, 1, 0, 0,    0.5, 1, 0.5,  1, 0, 0,    0.5, 0, 0.5,  1, 0, 0,
-  // Left (-x)
+  // left (-x)
   -0.5, 0, -0.5, -1, 0, 0,  -0.5, 1, 0.5,  -1, 0, 0,  -0.5, 1, -0.5, -1, 0, 0,
   -0.5, 0, -0.5, -1, 0, 0,  -0.5, 0, 0.5,  -1, 0, 0,  -0.5, 1, 0.5,  -1, 0, 0,
 ]);
@@ -210,19 +251,23 @@ gl.vertexAttribPointer(attr.a_position, 3, gl.FLOAT, false, 24, 0);
 gl.enableVertexAttribArray(attr.a_normal);
 gl.vertexAttribPointer(attr.a_normal, 3, gl.FLOAT, false, 24, 12);
 
-// Per-instance attributes: a divisor of 1 means "advance to the next value
-// once per cube copy" instead of once per vertex.
+// [NEW] per-instance attributes advance to the next value once per cube copy
+// instead of once per vertex
 for (const name of ['a_offset', 'a_scale', 'a_colorBottom', 'a_colorTop', 'a_rotY']) {
   gl.enableVertexAttribArray(attr[name]);
   instancing.vertexAttribDivisorANGLE(attr[name], 1);
 }
 
 
-// =====================================================================
-// 3. CUBEBATCH: a list of cube instances drawn with one draw call
+
+//   CUBEBATCH - a list of cube instances drawn with one draw call
+//
+//    [NEW] Replaces the examples' "for each cube: set uModel, set uColor,
+//    drawArrays" loop. Each cube's translation, scale, colors and rotation
+//    are stored in one GPU buffer and drawn together.
 //    Each cube uses 13 numbers:
 //      offset x,y,z | scale x,y,z | bottom r,g,b | top r,g,b | rotY
-// =====================================================================
+
 const FLOATS_PER_CUBE = 13;
 
 class CubeBatch {
@@ -231,10 +276,10 @@ class CubeBatch {
     this.count = capacity;
     this.data = new Float32Array(capacity * FLOATS_PER_CUBE);
     this.buffer = gl.createBuffer();
-    this.dirty = true;   // true = data changed, must be re-sent to the GPU
+    this.dirty = true;   // true = data changed re send to gpu
   }
 
-  // Fast version (no arrays created) for code that runs every frame.
+  // fast version (no arrays created) for code that runs every frame
   set(i, x, y, z, sx, sy, sz, br, bg, bb, tr, tg, tb, rotY) {
     const d = this.data, o = i * FLOATS_PER_CUBE;
     d[o] = x;      d[o + 1] = y;   d[o + 2] = z;
@@ -245,7 +290,7 @@ class CubeBatch {
     this.dirty = true;
   }
 
-  // Friendlier version: colors as [r, g, b] arrays.
+  // friendlier version: colors as [r, g, b] arrays
   setCube(i, [x, y, z], [sx, sy, sz], bottom, top = bottom, rotY = 0) {
     this.set(i, x, y, z, sx, sy, sz, bottom[0], bottom[1], bottom[2], top[0], top[1], top[2], rotY);
   }
@@ -256,7 +301,7 @@ class CubeBatch {
 let cubesDrawnThisFrame = 0;
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
-// Draw every cube in the batch. `model` moves the whole batch at once.
+// draws every cube in a batch, model moves the whole batch at once
 function drawBatch(batch, model = IDENTITY) {
   if (!batch || batch.count === 0) return;
   gl.bindBuffer(gl.ARRAY_BUFFER, batch.buffer);
@@ -275,7 +320,7 @@ function drawBatch(batch, model = IDENTITY) {
   cubesDrawnThisFrame += batch.count;
 }
 
-// Material switches for the next draw calls.
+// switches for the next draw calls (glow, shiny, tint, fog)
 function setMaterial({ emissive = 0, specular = 0, tint = [1, 1, 1], fog = env.fogOn } = {}) {
   gl.uniform1f(uni.u_emissive, emissive);
   gl.uniform1f(uni.u_specular, specular);
@@ -284,10 +329,19 @@ function setMaterial({ emissive = 0, specular = 0, tint = [1, 1, 1], fog = env.f
 }
 
 
-// =====================================================================
-// 4. MATRIX HELPERS (column-major, the order WebGL expects)
-//    In multiply(a, b) the transform b happens FIRST, then a.
-// =====================================================================
+
+//   MATRIX HELPERS 
+//
+//    [REUSED] translation, scaling, multiply, perspective and lookAt are
+//    from webgl-cubes-v2
+//
+//    [CHANGED] the small vector helpers (dot, cross, normalize) were inside
+//    lookAt, I moved them out here so other code can use them
+//
+//    [NEW] rotationX / rotationY / rotationZ, chain, mix3, clamp,
+//    smoothstep and seededRandom.
+//    in multiply(a, b) the transform b happens FIRST, then a
+
 function translation(x, y, z) {
   return [1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  x, y, z, 1];
 }
@@ -336,7 +390,7 @@ const mix3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const smoothstep = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
 
-// The pinhole camera: sits at `eye`, looks at `target`.
+// pinhole camera, sits at eye and looks at target
 function lookAt(eye, target, up) {
   const zAxis = normalize(sub(eye, target));
   const xAxis = normalize(cross(up, zAxis));
@@ -349,7 +403,7 @@ function lookAt(eye, target, up) {
   ];
 }
 
-// Small seeded random generator, so "random" scenes can be repeated.
+// seeded random so the same seed gives the same random scene
 function seededRandom(seed) {
   let s = seed >>> 0;
   return function () {
@@ -362,22 +416,25 @@ function seededRandom(seed) {
 }
 
 
-// =====================================================================
-// 5. BÉZIER CURVES
-//    A cubic Bézier curve blends 4 control points P0..P3 with the
-//    Bernstein polynomials:
-//      B(t) = (1-t)^3 P0 + 3(1-t)^2 t P1 + 3(1-t) t^2 P2 + t^3 P3,  t in [0,1]
-//    The curve starts at P0, ends at P3, and is "pulled" toward P1, P2.
-// =====================================================================
+
+
+//   BEZIER CURVES
+//
+//    [NEW] not in the class code examples, I wrote these from the cubic
+//    bezier formula in the curves slides (09-01 / 09-02)
+//
+//    B(t) = (1-t)^3 P0 + 3(1-t)^2 t P1 + 3(1-t) t^2 P2 + t^3 P3,  t from 0 to 1
+//    starts at P0, ends at P3, and gets pulled toward P1 and P2
+
 function bezier1(p0, p1, p2, p3, t) {
   const u = 1 - t;
   return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3;
 }
-// Works for 2D or 3D points: apply the formula to each coordinate.
+// works for 2d or 3d points, does the formula on each coordinate
 function bezierPoint(P, t) {
   return P[0].map((_, k) => bezier1(P[0][k], P[1][k], P[2][k], P[3][k], t));
 }
-// Derivative (direction of travel): B'(t) = 3(1-t)^2 (P1-P0) + 6(1-t)t (P2-P1) + 3t^2 (P3-P2)
+// derivative = direction it's moving: B'(t) = 3(1-t)^2 (P1-P0) + 6(1-t)t (P2-P1) + 3t^2 (P3-P2)
 function bezierTangent(P, t) {
   const u = 1 - t;
   return P[0].map((_, k) =>
@@ -385,10 +442,11 @@ function bezierTangent(P, t) {
 }
 
 
-// =====================================================================
-// SHARED STATE (changed by the controls in the side panel)
-// =====================================================================
-const WORLD_SIZE = 100;   // the landscape is always 100 units wide; more cubes = smaller cubes
+
+
+//   SHARED STATE - the controls in the side panel change these
+
+const WORLD_SIZE = 100;   // landscape is always 100 wide, more cubes = smaller cubes
 
 const state = {
   level: '0',
@@ -399,8 +457,8 @@ const state = {
   autoOrbit: true, orbitSpeed: 0.15,
 };
 
-let ground = null;            // the main CubeBatch for the current level
-let buildToken = 0;           // used to ignore old image loads after switching level
+let ground = null;            // main cubebatch for the level I'm on
+let buildToken = 0;           // so old image loads get ignored if I switch levels
 const statusEl = document.getElementById('status');
 function showStatus(text) { statusEl.hidden = !text; statusEl.textContent = text || ''; }
 
@@ -410,18 +468,22 @@ function replaceGround(batch) {
 }
 
 
-// =====================================================================
-// 6. LEVEL 0 + LEVEL 1: SINGLE CUBE AND PROCEDURAL LANDSCAPE
-// =====================================================================
+
+
+//   LEVEL 0 + LEVEL 1 - single cube and random grid
+//
+//    [CHANGED] level 0 uses the idea from camera-move's makeModelMatrix,
+//    scale the cube then translate it (scale 2, move down 1)
+
 function buildSingleCube() {
-  // Level 0: one 2 x 2 x 2 cube, centered on the origin.
-  // Scale the unit cube by 2, then move it down 1 so its center is at y = 0.
+  // level 0: one 2x2x2 cube centered on the origin
+  // scale by 2 then move down 1 so the center is at y = 0
   const b = new CubeBatch(1);
   b.setCube(0, [0, -1, 0], [2, 2, 2], [0.2, 0.6, 0.9]);
   replaceGround(b);
 }
 
-// Ocean palette: height 0..1 -> deep blue -> teal -> white foam.
+// ocean colors for height 0 to 1: deep blue -> teal -> white foam
 const DEEP = [0.03, 0.16, 0.36], TEAL = [0.04, 0.48, 0.62], LIGHT = [0.35, 0.76, 0.84], FOAM = [0.93, 0.97, 1.0];
 function oceanColor(n, out) {
   let a, b, t;
@@ -434,28 +496,35 @@ function oceanColor(n, out) {
   return out;
 }
 
-// Level 1: a grid of cubes with RANDOM heights and RANDOM colors.
+// level 1: grid of cubes with random heights and random colors
+//
+// [REUSED] the grid loop, centering formula (col - (N - 1) / 2) * spacing,
+//   and random height + color per cube are from webgl-cubes-v2
+//
+// [CHANGED] you can change the grid size (10 to 400) and it always stays
+//   100 wide so spacing = 100 / N, I also added a small gap between cubes
+//   random comes from a seed so "randomize again" works
+//   each cube gets two random colors (top and bottom) instead of one to
+//   show interpolation
 function buildRandomGrid() {
   const N = state.gridN;
   const spacing = WORLD_SIZE / N;
-  const size = spacing * 0.85;               // leave a small gap so each cube is visible
-  const rand = seededRandom(state.seed);     // same seed = same "random" landscape
+  const size = spacing * 0.85;               // small gap so you can see each cube
+  const rand = seededRandom(state.seed);     // same seed = same landscape
   const b = new CubeBatch(N * N);
 
   let i = 0;
   for (let row = 0; row < N; row++) {
     for (let col = 0; col < N; col++) {
-      // 1a. TRANSLATION: center the grid on the origin in the x-z plane.
+      // 1a translation - center the grid on the origin in the x-z plane
       const x = (col - (N - 1) / 2) * spacing;
       const z = (row - (N - 1) / 2) * spacing;
 
-      // 1b. SCALING in y (the direction orthogonal to the x-z plane)
-      // by a random amount.
+      // 1b scaling - stretch in y (orthogonal to x-z) by a random amount
       const height = 0.3 + rand() * state.heightScale;
 
-      // 1c. VERTEX COLORS: a random color for the 4 top corners and a
-      // darker random color for the 4 bottom corners. The fragment shader
-      // blends (interpolates) between them up each side of the cube.
+      // 1c vertex colors - random color on the top 4 corners, darker random
+      // color on the bottom 4, the shader blends between them up each side
       const top = [rand(), rand(), rand()];
       const bottom = [rand() * 0.4, rand() * 0.4, rand() * 0.4];
 
@@ -466,16 +535,20 @@ function buildRandomGrid() {
 }
 
 
-// =====================================================================
-// 7. LEVEL 2: LANDSCAPE FROM IMAGE DATA
-//    Everything comes from one picture, wave2.png:
-//      color  = the pixel colors
-//      height = the pixel brightness (the image read as grayscale)
-// =====================================================================
+
+
+//   LEVEL 2 - landscape from image data
+//
+//    [NEW] not in the class examples, I read the pixels with getImageData
+//    (from the w3schools link in the assignment)
+//    everything comes from wave2.png:
+//      color  = pixel colors
+//      height = pixel brightness (the image as grayscale)
+
 const IMAGE_SRC = 'wave2.png';
 const pixelCache = {};
 
-// Load an image and read ALL its pixels once with getImageData.
+// load the image and read all its pixels once with getImageData
 function loadPixels(src) {
   if (!pixelCache[src]) {
     pixelCache[src] = new Promise((resolve, reject) => {
@@ -501,10 +574,10 @@ function loadPixels(src) {
   return pixelCache[src];
 }
 
-// SAMPLING: one grid cell covers a rectangle of many pixels
-// (e.g. a 1000 px image on a 100-cube grid = 10 x 10 pixels per cube).
-// We AVERAGE every pixel in that rectangle, which is a box filter.
-// Picking just one pixel would flicker/alias on detailed images.
+// sampling - one cube covers a block of pixels
+// (1000 px image on a 100 cube grid = 10x10 pixels per cube)
+// I average all the pixels in the block (box filter), just picking one
+// pixel looked noisy on detailed images
 function averageBlock(img, u0, v0, u1, v1, out) {
   const x0 = Math.floor(u0 * img.width), x1 = Math.max(x0 + 1, Math.floor(u1 * img.width));
   const y0 = Math.floor(v0 * img.height), y1 = Math.max(y0 + 1, Math.floor(v1 * img.height));
@@ -520,9 +593,9 @@ function averageBlock(img, u0, v0, u1, v1, out) {
   return out;
 }
 
-// Sample the image into an N x N grid. The image is 882 x 620 (not square),
-// so we CROP to the centered 620 x 620 square: the grid is square and the
-// picture is not stretched. Returns a color and a brightness (0..1) per cell.
+// samples the image into an N x N grid. wave2.png is 882 x 620 (not square)
+// so I crop the middle 620 x 620 square, that way the grid is square and the
+// picture doesn't get stretched. gives back a color and brightness (0-1) per cell
 const sampleCache = {};
 function sampleSquare(img, N) {
   if (sampleCache[N]) return sampleCache[N];
@@ -539,7 +612,7 @@ function sampleSquare(img, N) {
         uStart + ((col + 1) / N) * uSize, vStart + ((row + 1) / N) * vSize, c);
       const i = row * N + col;
       colors[i * 3] = c[0]; colors[i * 3 + 1] = c[1]; colors[i * 3 + 2] = c[2];
-      // Luminance: how bright the pixel looks to a human eye, 0..1.
+      // luminance = how bright it looks to your eye, 0 to 1
       brightness[i] = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
     }
   }
@@ -556,7 +629,7 @@ async function buildImageTerrain() {
     if (token === buildToken) showStatus(err.message);
     return;
   }
-  if (token !== buildToken) return;   // the user switched levels while loading
+  if (token !== buildToken) return;   // switched levels while it was loading
 
   const N = state.imageRes;
   const { colors, brightness } = sampleSquare(img, N);
@@ -566,7 +639,7 @@ async function buildImageTerrain() {
     for (let col = 0; col < N; col++) {
       const i = row * N + col;
       const r = colors[i * 3], g = colors[i * 3 + 1], bl = colors[i * 3 + 2];
-      // HEIGHT MAPPING: brightness 0..1 (from 0..255) -> a real height.
+      // height mapping - brightness 0-1 (was 0-255) -> actual height
       const height = 0.3 + brightness[i] * state.heightScale;
       const x = (col - (N - 1) / 2) * spacing;
       const z = (row - (N - 1) / 2) * spacing;
@@ -578,25 +651,27 @@ async function buildImageTerrain() {
 }
 
 
-// =====================================================================
-// 8. LEVEL 3: BÉZIER WAVES + BÉZIER CLOUDS
-// =====================================================================
 
-// ---- 8a. The wave cross-section --------------------------------------
-// One wavelength of the sea surface is drawn as TWO cubic Bézier curves
-// (x = position across the wave 0..1, y = height 0..1):
-//   segment A: the long gentle back of the wave rising to the crest
-//   segment B: the steep front face falling back down
-// Both have flat tangents at the crest and the ends, so the wave is
-// smooth (C1 continuous) and repeats without a seam.
+
+//   LEVEL 3 - bezier waves + bezier clouds
+//
+//    [NEW] I wrote all of this section for the project
+
+// wave shape
+// one wavelength of the sea is two cubic bezier curves
+// (x = position across the wave 0-1, y = height 0-1)
+//   segment A: the long gentle back of the wave going up to the crest
+//   segment B: the steep front coming back down
+// both are flat at the crest and at the ends so the wave is smooth
+// (C1 continuous) and repeats without a seam
 const DEFAULT_WAVE = [
   [[0, 0], [0.35, 0], [0.55, 1], [0.7, 1]],
   [[0.7, 1], [0.84, 1], [0.88, 0], [1, 0]],
 ];
 let waveCurve = DEFAULT_WAVE.map((seg) => seg.map((p) => p.slice()));
 
-// The curve gives points (x(t), y(t)), but we need "height at position x".
-// So we sample the curve densely once and store a lookup table (LUT).
+// the curve gives points (x(t), y(t)) but I need height at a position x,
+// so I sample the curve a lot once and save it in a lookup table
 const LUT_SIZE = 512;
 const waveLUT = new Float32Array(LUT_SIZE);
 function rebuildWaveLUT() {
@@ -616,7 +691,7 @@ function rebuildWaveLUT() {
 }
 rebuildWaveLUT();
 
-// Height of the wave profile at u (repeats every 1.0).
+// height of the wave at u (repeats every 1)
 function waveProfile(u) {
   u -= Math.floor(u);
   const f = u * (LUT_SIZE - 1);
@@ -625,8 +700,8 @@ function waveProfile(u) {
   return a + (b - a) * (f - i);
 }
 
-// A second, 1D Bézier bends the crest line so the waves are not
-// perfectly straight: the crest is shifted by crestBend(z).
+// a second 1d bezier bends the crest line so the waves aren't
+// perfectly straight
 const CREST_BEND = [0, 14, -10, 2];
 function crestBend(z) {
   const s = clamp((z + WORLD_SIZE / 2) / WORLD_SIZE, 0, 1);
@@ -637,8 +712,8 @@ const SEA_BASE = 0.6;
 const MAIN_WAVELENGTH = 38, SWELL_WAVELENGTH = 16;
 function waveAmplitude() { return state.waveAmp * (state.level === '4' && state.storm ? 1.6 : 1); }
 
-// The moving Bézier wave at world point (x, z) and time t: the main wave
-// travels along +x, plus a smaller cross swell travelling diagonally.
+// the moving bezier wave at (x, z) and time t, main wave goes along +x
+// plus a smaller swell going diagonally
 function waveHeight(x, z, t, bend = crestBend(z)) {
   const amp = waveAmplitude();
   const u1 = (x + bend - t * state.waveSpeed) / MAIN_WAVELENGTH;
@@ -646,7 +721,7 @@ function waveHeight(x, z, t, bend = crestBend(z)) {
   return amp * waveProfile(u1) + amp * 0.2 * waveProfile(u2);
 }
 
-// The still sea surface from wave2.png: brightness -> height.
+// still sea surface from wave2.png, brightness -> height
 let seaImage = null;   // { N, colors, brightness } once the image is sampled
 function imageHeightAt(x, z) {
   if (!seaImage) return 0;
@@ -656,7 +731,7 @@ function imageHeightAt(x, z) {
   return seaImage.brightness[row * N + col] * state.imageSeaScale;
 }
 
-// Final sea height = image height + Bézier wave on top.
+// sea height = image height + bezier wave on top
 function seaHeight(x, z, t) {
   return SEA_BASE + imageHeightAt(x, z) + waveHeight(x, z, t);
 }
@@ -667,7 +742,7 @@ async function loadSeaImage() {
     const img = await loadPixels(IMAGE_SRC);
     if (state.seaRes !== N) return;   // resolution changed while loading
     seaImage = sampleSquare(img, N);
-    // Color the far ocean with the image's average color, a little darker.
+    // color the far ocean with the image's average color, a bit darker
     const avg = [0, 0, 0];
     for (let i = 0; i < N * N; i++) for (let k = 0; k < 3; k++) avg[k] += seaImage.colors[i * 3 + k] / (N * N);
     oceanFloor.setCube(0, [0, -0.5, 0], [3000, 1, 3000], avg.map((v) => v * 0.6), avg.map((v) => v * 0.75));
@@ -682,7 +757,7 @@ function buildSea() {
   sea = new CubeBatch(state.seaRes * state.seaRes);
 }
 
-// Every frame: re-scale every sea cube to the current wave height.
+// every frame I re-scale every sea cube to the wave height
 const tmpColor = [0, 0, 0];
 function updateSea(t) {
   const N = state.seaRes;
@@ -698,7 +773,7 @@ function updateSea(t) {
       const wave = waveHeight(x, z, t, bend);
       const n = clamp(wave / (amp * 1.15), 0, 1);   // 0 = trough, 1 = crest
 
-      // Base color + still height from the image (blue palette until it loads).
+      // color + still height from the image (blue colors until it loads)
       let r, g, b, imgH = 0;
       if (img) {
         r = img.colors[i * 3]; g = img.colors[i * 3 + 1]; b = img.colors[i * 3 + 2];
@@ -707,9 +782,9 @@ function updateSea(t) {
         oceanColor(n, tmpColor);
         r = tmpColor[0]; g = tmpColor[1]; b = tmpColor[2];
       }
-      // White foam where the Bézier wave is near its crest.
+      // white foam near the crest of the bezier wave
       const foam = smoothstep(0.75, 1, n) * 0.6;
-      // Troughs a little darker, crests lighter: makes the rolling wave easy to see.
+      // troughs darker and crests lighter so you can see the wave roll
       const shade = 0.7 + 0.3 * n;
       r *= shade; g *= shade; b *= shade;
       r += (FOAM[0] - r) * foam; g += (FOAM[1] - g) * foam; b += (FOAM[2] - b) * foam;
@@ -720,27 +795,27 @@ function updateSea(t) {
   }
 }
 
-// A huge flat cube under the sea so the ocean reaches the horizon.
+// giant flat cube under the sea so the ocean goes to the horizon
 const oceanFloor = new CubeBatch(1);
 oceanFloor.setCube(0, [0, -0.5, 0], [3000, 1, 3000], DEEP, DEEP);
 
-// ---- 8b. Clouds that drift along 3D Bézier paths ---------------------
+// clouds that move along 3d bezier paths
 let clouds = [];
 let cloudPathMarkers = null;
 
 function makeCloud(rand) {
-  // A cloud is 5-10 "puff" cubes, each scaled, rotated and translated.
+  // each cloud is 5-10 cubes that are scaled, rotated and translated
   const puffCount = 5 + Math.floor(rand() * 6);
   const puffs = new CubeBatch(puffCount);
   for (let i = 0; i < puffCount; i++) {
     const s = [3 + rand() * 5, 1.5 + rand() * 2.5, 2.5 + rand() * 3.5];
     const offset = [(rand() - 0.5) * 10, rand() * 2 - s[1] / 2, (rand() - 0.5) * 5];
-    // Gray-blue bottoms and white tops: interpolated like real cloud shading.
+    // grey-blue bottom and white top, interpolated like real cloud shading
     puffs.setCube(i, offset, s, [0.72, 0.76, 0.84], [1, 1, 1], rand() * Math.PI);
   }
 
-  // The path: start far off the west edge, end far off the east edge.
-  // P1 and P2 pull the cloud sideways and up/down, making a gentle S-curve.
+  // path starts way off one edge and ends way off the other edge,
+  // P1 and P2 pull it sideways and up/down so it makes an s-curve
   const y = 20 + rand() * 12;
   const z = (rand() - 0.5) * 90;
   const path = [
@@ -758,7 +833,7 @@ function buildClouds() {
   clouds = [];
   for (let i = 0; i < state.cloudCount; i++) clouds.push(makeCloud(rand));
 
-  // Little markers along each Bézier path, for the "show paths" option.
+  // little markers along each path for the "show paths" switch
   if (cloudPathMarkers) cloudPathMarkers.dispose();
   const SAMPLES = 40;
   cloudPathMarkers = new CubeBatch(Math.max(1, clouds.length * (SAMPLES + 4)));
@@ -776,24 +851,27 @@ function buildClouds() {
 function updateClouds(dt) {
   for (const c of clouds) {
     c.t += c.speed * dt * (state.level === '4' && state.storm ? 2.5 : 1);
-    if (c.t > 1) c.t -= 1;   // drifted far away: go back to the start
+    if (c.t > 1) c.t -= 1;   // far away, go back to the start
   }
 }
 
 function cloudModel(c) {
   const p = bezierPoint(c.path, c.t);
   const tangent = bezierTangent(c.path, c.t);
-  const yaw = Math.atan2(-tangent[2], tangent[0]);   // turn the cloud to face its direction
-  // Grow in at the start and shrink out at the end, so clouds never "pop".
+  const yaw = Math.atan2(-tangent[2], tangent[0]);   // turn the cloud to face the way it's going
+  // grow in at the start and shrink at the end so clouds don't pop in
   const fade = smoothstep(0, 0.1, c.t) * (1 - smoothstep(0.9, 1, c.t));
   const s = Math.max(0.001, c.size * fade);
   return chain(translation(p[0], p[1], p[2]), rotationY(yaw), scaling(s, s, s));
 }
 
 
-// =====================================================================
-// 9. LEVEL 4: LIGHT, SKYBOX, FOG, BOAT, SEAGULLS, STORM
-// =====================================================================
+
+
+//   LEVEL 4 - lighting, skybox, fog, boat, seagulls, storm
+//
+//    [NEW] I wrote all of this section for the project
+
 const env = {
   fogOn: false,
   lightDir: [0.5, 0.8, 0.3], lightColor: [1, 1, 1], ambient: [0.3, 0.3, 0.3],
@@ -802,7 +880,7 @@ const env = {
   sunDir: [0.5, 0.8, 0.3], celestialColor: [1, 0.95, 0.7],
 };
 
-// Sky palettes for different sun heights.
+// sky colors for different sun heights
 const SKY = {
   day:    { zenith: [0.20, 0.45, 0.85], horizon: [0.70, 0.85, 0.97], light: [1.0, 0.96, 0.88], ambient: 0.35 },
   sunset: { zenith: [0.22, 0.24, 0.50], horizon: [0.98, 0.55, 0.32], light: [1.0, 0.62, 0.38], ambient: 0.25 },
@@ -822,7 +900,7 @@ function updateEnvironment(dt) {
   }
   const a = state.sunAngle * Math.PI / 180;
   const sunDir = normalize([Math.cos(a), Math.sin(a), 0.35]);
-  const e = sunDir[1];   // sun height: 1 = overhead, negative = below horizon
+  const e = sunDir[1];   // sun height, 1 = overhead, negative = below horizon
 
   let sky;
   if (e >= 0.25) sky = SKY.day;
@@ -831,7 +909,7 @@ function updateEnvironment(dt) {
   else sky = SKY.night;
 
   let zenith = sky.zenith, horizon = sky.horizon, light = sky.light, ambient = sky.ambient;
-  // At night, the moon (opposite the sun) becomes the light source.
+  // at night the moon (opposite the sun) is the light
   env.sunDir = e >= -0.05 ? sunDir : [-sunDir[0], -sunDir[1], -sunDir[2]];
   env.celestialColor = e >= -0.05 ? mix3([1, 0.55, 0.25], [1, 0.97, 0.75], clamp(e * 3, 0, 1)) : [0.85, 0.9, 1.0];
 
@@ -842,7 +920,7 @@ function updateEnvironment(dt) {
     horizon = mix3(horizon, gray.map((v) => v * dim), 0.8);
     light = light.map((v) => v * 0.35);
     ambient *= 0.8;
-    // Lightning: occasional bright flash that fades quickly.
+    // lightning - random bright flash that fades fast
     env.nextFlash -= dt;
     if (env.nextFlash <= 0) { env.flash = 1; env.nextFlash = 2 + Math.random() * 5; }
   }
@@ -857,13 +935,13 @@ function updateEnvironment(dt) {
   env.fogDensity = state.storm ? 0.015 : 0.0065;
 }
 
-// ---- Skybox: a giant cube around the camera, horizon color on the
-// bottom corners and sky color on the top corners (interpolated). ----
+// skybox - giant cube around the camera, horizon color on the bottom
+// corners and sky color on top (interpolated)
 const SKY_SIZE = 800;
 const skybox = new CubeBatch(1);
 const sunCube = new CubeBatch(1);
 
-// ---- Boat: a few cubes positioned relative to the boat (forward = +x) ----
+// boat - a few cubes placed relative to the boat (front = +x)
 const boat = new CubeBatch(6);
 boat.setCube(0, [0, 0, 0], [4.0, 0.9, 1.7], [0.25, 0.13, 0.06], [0.55, 0.32, 0.15]);           // hull
 boat.setCube(1, [2.3, 0.15, 0], [1.0, 0.75, 1.1], [0.25, 0.13, 0.06], [0.55, 0.32, 0.15]);     // bow
@@ -876,7 +954,7 @@ let boatPitch = 0, boatRoll = 0;
 function boatModel(t) {
   const x = 0, z = 0, d = 1.0;
   const h = seaHeight(x, z, t);
-  // Tilt the boat to match the slope of the water (finite differences).
+  // tilt the boat to match the slope of the water
   const slopeX = (seaHeight(x + d, z, t) - seaHeight(x - d, z, t)) / (2 * d);
   const slopeZ = (seaHeight(x, z + d, t) - seaHeight(x, z - d, t)) / (2 * d);
   boatPitch += (clamp(Math.atan(slopeX), -0.6, 0.6) - boatPitch) * 0.15;
@@ -884,9 +962,9 @@ function boatModel(t) {
   return chain(translation(x, h - 0.5, z), rotationZ(boatPitch), rotationX(boatRoll), scaling(1.6, 1.6, 1.6));
 }
 
-// ---- Seagulls: fly in circles made from 4 Bézier segments ----
-// A quarter circle is closely approximated by a cubic Bézier whose
-// handles are k = 0.5523 x radius long.
+// seagulls - fly in circles made from 4 bezier curves
+// a cubic bezier is really close to a quarter circle if the
+// handles are 0.5523 x radius long
 const gullBody = new CubeBatch(3);
 gullBody.setCube(0, [0, -0.2, 0], [0.5, 0.45, 1.8], [0.85, 0.85, 0.85], [1, 1, 1]);   // body
 gullBody.setCube(1, [0, 0.0, 1.0], [0.42, 0.42, 0.5], [0.9, 0.9, 0.9], [1, 1, 1]);   // head
@@ -904,7 +982,7 @@ function makeCirclePath(center, r) {
     const tA = [-Math.sin(a0), 0, Math.cos(a0)], tB = [-Math.sin(a1), 0, Math.cos(a1)];
     segments.push([A, [A[0] + k * tA[0], A[1], A[2] + k * tA[2]], [B[0] - k * tB[0], B[1], B[2] - k * tB[2]], B]);
   }
-  // Keep the heights continuous where segments meet.
+  // keep heights the same where the segments meet
   for (let q = 0; q < 4; q++) segments[q][0][1] = segments[(q + 3) % 4][3][1];
   return segments;
 }
@@ -924,16 +1002,16 @@ function drawGulls(t) {
     const local = s - Math.floor(s);
     const p = bezierPoint(seg, local);
     const tan = bezierTangent(seg, local);
-    const yaw = Math.atan2(tan[0], tan[2]);   // local +z (beak) faces the direction of travel
+    const yaw = Math.atan2(tan[0], tan[2]);   // beak (+z) faces the way it's flying
     const G = chain(translation(p[0], p[1], p[2]), rotationY(yaw), rotationZ(-0.25));
     const flap = Math.sin(t * 7 + g.flapPhase) * 0.55;
     drawBatch(gullBody, G);
     drawBatch(gullWing, chain(G, translation(0.2, 0.05, 0), rotationZ(flap)));                     // right wing
-    drawBatch(gullWing, chain(G, translation(-0.2, 0.05, 0), rotationY(Math.PI), rotationZ(flap))); // left wing (mirrored)
+    drawBatch(gullWing, chain(G, translation(-0.2, 0.05, 0), rotationY(Math.PI), rotationZ(flap))); // left wing (flipped)
   }
 }
 
-// ---- Rain: thin falling cubes ----
+// rain - thin falling cubes
 const RAIN_COUNT = 2000;
 const rain = new CubeBatch(RAIN_COUNT);
 const rainDrops = [];
@@ -953,9 +1031,19 @@ function updateRain(dt) {
 }
 
 
-// =====================================================================
-// 10. CAMERA: orbits the look-at point; drag to turn, scroll to zoom
-// =====================================================================
+
+
+//   CAMERA - orbits the look at point, drag to turn, scroll to zoom
+//
+//    [REUSED] orbit idea is from camera-move, eye goes on a circle
+//    eye = (r cos θ, height, r sin θ), θ grows over time, lookAt the center
+//
+//    [CHANGED] I made the height an angle (pitch) so the camera moves on a
+//    sphere, and each level has its own starting distance. the angle grows
+//    by speed x frame time
+//
+//    [NEW] mouse / touch dragging and scroll wheel zoom
+
 const camera = { yaw: 0.8, pitch: 0.5, radius: 120, target: [0, 0, 0], minR: 3, maxR: 400 };
 
 function cameraEye() {
@@ -983,9 +1071,12 @@ canvas.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 
-// =====================================================================
-// LEVEL DESCRIPTIONS (shown in the side panel)
-// =====================================================================
+
+
+//   LEVEL DESCRIPTIONS - text + starting camera for each level
+//
+//    [NEW] all of this
+
 const LEVELS = {
   '0': {
     tab: 'Level 0 · Cube',
@@ -1064,9 +1155,21 @@ const LEVELS = {
 };
 
 
-// =====================================================================
-// 11. THE RENDER LOOP
-// =====================================================================
+
+
+//   RENDER LOOP
+//
+//    [REUSED] the structure is from camera-move: resizeCanvas, then
+//    requestAnimationFrame(render) every frame, set view + projection once
+//    per frame, clear color + depth, draw, repeat. gl.enable(DEPTH_TEST)
+//    is in both examples
+//
+//    [CHANGED] resizeCanvas also uses the screen's pixel density (max 1.5
+//    for speed), and the far plane is 3000 instead of 100 for the big ocean
+//
+//    [NEW] frame time (dt) so speed doesn't depend on frame rate, the fps
+//    counter, and drawing the skybox, sea, clouds, boat, gulls and rain
+
 gl.enable(gl.DEPTH_TEST);
 
 function resizeCanvas() {
@@ -1090,7 +1193,7 @@ function render(nowMs) {
   const isSea = level === '3' || level === '4';
   const full = level === '4';
 
-  // ---- Camera (Level 1d: orbit around the look-at point) ----
+  // camera (level 1d: orbit around the look at point)
   if (state.autoOrbit && !dragging) camera.yaw += state.orbitSpeed * dt;
   const eye = cameraEye();
   gl.uniformMatrix4fv(uni.u_view, false, lookAt(eye, camera.target, [0, 1, 0]));
@@ -1098,7 +1201,7 @@ function render(nowMs) {
     perspective(Math.PI / 4, canvas.width / canvas.height, level === '0' ? 0.1 : 0.5, 3000));
   gl.uniform3fv(uni.u_cameraPos, eye);
 
-  // ---- Lighting / fog settings ----
+  // lighting + fog settings
   if (full) updateEnvironment(dt);
   env.fogOn = full && state.fog;
   gl.uniform1f(uni.u_lighting, full && state.lighting ? 1 : 0);
@@ -1108,14 +1211,14 @@ function render(nowMs) {
   gl.uniform3fv(uni.u_fogColor, env.horizon);
   gl.uniform1f(uni.u_fogDensity, env.fogDensity);
 
-  // ---- Clear ----
+  // clear
   if (full) gl.clearColor(env.horizon[0], env.horizon[1], env.horizon[2], 1);
   else if (isSea) gl.clearColor(0.62, 0.8, 0.95, 1);
   else gl.clearColor(0.06, 0.09, 0.13, 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-  // ---- Skybox and sun (drawn first, without writing depth, so
-  //      everything else is drawn in front of them) ----
+  // skybox and sun, drawn first without writing depth so everything
+  // else draws in front of them
   if (full && state.skybox) {
     gl.depthMask(false);
     setMaterial({ emissive: 1, fog: false });
@@ -1129,13 +1232,13 @@ function render(nowMs) {
   }
 
   if (isSea) {
-    // ---- The Bézier sea ----
+    // the bezier sea
     updateSea(simTime);
     setMaterial({ specular: 0.9 });
     drawBatch(oceanFloor);
     drawBatch(sea);
 
-    // ---- Clouds ----
+    // clouds
     updateClouds(dt);
     const cloudTint = full && state.storm ? [0.45, 0.47, 0.52] : [1, 1, 1];
     setMaterial({ tint: cloudTint });
@@ -1158,7 +1261,7 @@ function render(nowMs) {
     drawBatch(ground);
   }
 
-  // ---- Frame rate counter ----
+  // fps counter
   fpsFrames++;
   if (now - fpsTime > 0.5) {
     fps = Math.round(fpsFrames / (now - fpsTime));
@@ -1171,9 +1274,13 @@ function render(nowMs) {
 }
 
 
-// =====================================================================
-// 12. USER INTERFACE
-// =====================================================================
+
+
+//   USER INTERFACE
+//
+//    [NEW] level menu, sliders, switches and the bezier wave editor,
+//    the class examples didn't have any ui
+
 function rebuild() {
   buildToken++;
   showStatus('');
@@ -1199,20 +1306,22 @@ function setLevel(level) {
   if (level === '3' || level === '4') drawWaveEditor();
 }
 
-// Build the tab buttons.
+// make the level menu buttons
 const tabs = document.getElementById('tabs');
-// (An explicit list, because objects put number-like keys such as '2' first.)
+// I list the keys myself because objects put number keys like '2' first
 for (const key of ['0', '1', '2', '3', '4']) {
   const cfg = LEVELS[key];
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.textContent = cfg.tab;
+  // "Level 3 · Bézier sea + clouds" -> badge "3", title "Level 3", subtitle "Bézier sea + clouds"
+  const [title, subtitle] = cfg.tab.split(' · ');
+  btn.innerHTML = `<span class="badge">${key}</span><span class="label"><b>${title}</b><small>${subtitle}</small></span>`;
   btn.dataset.level = key;
   btn.addEventListener('click', () => setLevel(key));
   tabs.appendChild(btn);
 }
 
-// Connect every input with a data-key to the matching state value.
+// hook up every input with a data-key to the matching state value
 const REBUILD_ON = new Set(['gridN', 'heightScale', 'imageRes', 'seaRes', 'cloudCount']);
 function syncControl(key) {
   const out = document.querySelector(`[data-out="${key}"]`);
@@ -1230,7 +1339,7 @@ for (const input of document.querySelectorAll('[data-key]')) {
   if (input.type === 'checkbox') input.checked = state[key];
   else input.value = state[key];
   syncControl(key);
-  // Range sliders update live; heavy rebuilds happen when they are released.
+  // sliders update live, but big rebuilds wait until you let go
   input.addEventListener('input', () => {
     state[key] = read();
     syncControl(key);
@@ -1251,7 +1360,7 @@ document.getElementById('reset-camera').addEventListener('click', () => {
   Object.assign(camera, cfg, { target: cfg.target.slice(), yaw: 0.8 });
 });
 
-// ---- Interactive Bézier wave editor (2D canvas) ----
+// bezier wave editor (2d canvas)
 const editorCanvas = document.getElementById('bezier-editor');
 const ectx = editorCanvas.getContext('2d');
 const EDIT_PAD = 14, Y_MIN = -0.2, Y_MAX = 1.45;
@@ -1263,7 +1372,7 @@ const toCurve = (sx, sy) => [
   (sx - EDIT_PAD) / (editorCanvas.width - 2 * EDIT_PAD),
   Y_MIN + (editorCanvas.height - EDIT_PAD - sy) / (editorCanvas.height - 2 * EDIT_PAD) * (Y_MAX - Y_MIN),
 ];
-// The draggable points: two handles of each segment plus the shared crest.
+// the points you can drag: 2 handles per segment + the crest
 const editorHandles = () => [
   { id: 'A1', p: waveCurve[0][1] }, { id: 'A2', p: waveCurve[0][2] },
   { id: 'crest', p: waveCurve[0][3] },
@@ -1271,7 +1380,7 @@ const editorHandles = () => [
 ];
 
 function enforceWaveRules() {
-  // Control points must stay in left-to-right order so each x has one height.
+  // control points have to stay in left to right order so each x has one height
   const [A, B] = waveCurve;
   const c = A[3];
   c[0] = clamp(c[0], 0.1, 0.95);
@@ -1281,23 +1390,23 @@ function enforceWaveRules() {
   A[2][0] = clamp(A[2][0], A[1][0], c[0]);
   B[1][0] = clamp(B[1][0], c[0], 1);
   B[2][0] = clamp(B[2][0], B[1][0], 1);
-  B[0][0] = c[0]; B[0][1] = c[1];   // segment B starts where A ends
+  B[0][0] = c[0]; B[0][1] = c[1];   // B starts where A ends
 }
 
-// Colors come from CSS variables in style.css, so they follow light/dark mode.
+// colors come from style.css so they switch with light/dark mode
 const cssColor = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 function drawWaveEditor() {
   const w = editorCanvas.width, h = editorCanvas.height;
   ectx.clearRect(0, 0, w, h);
-  // Baseline (height 0) and crest guide (height 1)
+  // lines at height 0 and height 1
   ectx.strokeStyle = cssColor('--editor-grid');
   ectx.lineWidth = 1;
   for (const y of [0, 1]) {
     const [, sy] = toScreen([0, y]);
     ectx.beginPath(); ectx.moveTo(EDIT_PAD, sy); ectx.lineTo(w - EDIT_PAD, sy); ectx.stroke();
   }
-  // Control polygons
+  // control polygons (dashed)
   ectx.setLineDash([4, 4]);
   ectx.strokeStyle = cssColor('--editor-polygon');
   for (const seg of waveCurve) {
@@ -1306,7 +1415,7 @@ function drawWaveEditor() {
     ectx.stroke();
   }
   ectx.setLineDash([]);
-  // The curve itself, filled like water
+  // the curve, filled in like water
   ectx.beginPath();
   ectx.moveTo(...toScreen([0, Y_MIN]));
   for (const seg of waveCurve) {
@@ -1326,7 +1435,7 @@ function drawWaveEditor() {
   ectx.strokeStyle = cssColor('--editor-curve');
   ectx.lineWidth = 2.5;
   ectx.stroke();
-  // Points: fixed ends (gray), handles (yellow), crest (white)
+  // points: fixed ends (grey), handles (orange), crest
   const dotAt = (p, color, r) => {
     const [sx, sy] = toScreen(p);
     ectx.beginPath(); ectx.arc(sx, sy, r, 0, Math.PI * 2); ectx.fillStyle = color; ectx.fill();
@@ -1356,7 +1465,7 @@ editorCanvas.addEventListener('pointermove', (e) => {
   const [cx, cy] = toCurve(...editorPointer(e));
   const p = editorDrag.p;
   if (editorDrag.id === 'crest') {
-    // Moving the crest drags its two neighboring handles along with it.
+    // moving the crest drags the 2 handles next to it too
     const dx = cx - p[0], dy = cy - p[1];
     for (const q of [waveCurve[0][2], waveCurve[1][1]]) { q[0] += dx; q[1] += dy; }
   }
@@ -1373,9 +1482,9 @@ document.getElementById('reset-wave').addEventListener('click', () => {
 });
 
 
-// Redraw the editor when the system switches between light and dark mode.
+// redraw the editor if light/dark mode changes
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawWaveEditor);
 
-// ---- Start ----
+// start
 setLevel('0');
 requestAnimationFrame(render);

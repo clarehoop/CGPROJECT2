@@ -1,4 +1,14 @@
 <!doctype html>
+<!--
+  code sources
+  [REUSED] from the class examples (webgl-cubes-v2 and camera-move): a page
+    with one <canvas> for webgl and a <script> at the end of <body> that
+    loads index.js
+  [CHANGED] the canvas doesn't fill the whole window anymore, it sits inside
+    a page layout, and I moved the inline <style> to style.css
+  [NEW] header (title, name, project info), level menu on the left, side
+    panel with explanations + controls, and the bezier wave editor canvas
+-->
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -7,7 +17,7 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- ================= HEADER: title, name, project info ================= -->
+  <!-- header: title, name, project info -->
   <header class="site-header">
     <div class="title-block">
       <h1>Cube World <span>· Ocean in Motion</span></h1>
@@ -20,11 +30,13 @@
     </p>
   </header>
 
-  <!-- ================= LEVEL TABS (filled in by index.js) ================= -->
-  <nav id="tabs" class="tabs" aria-label="Project levels"></nav>
-
   <main class="layout">
-    <!-- ================= THE 3D VIEW ================= -->
+    <!-- level menu on the left (index.js adds the buttons) -->
+    <nav id="tabs" class="sidebar" aria-label="Project levels">
+      <h2 class="sidebar-title">Levels</h2>
+    </nav>
+
+    <!-- the 3d view -->
     <section class="viewport">
       <canvas id="glcanvas"></canvas>
       <div id="hud" class="hud"></div>
@@ -32,12 +44,12 @@
       <p class="hint">Drag to orbit · scroll to zoom</p>
     </section>
 
-    <!-- ================= SIDE PANEL: explanation + controls ================= -->
+    <!-- side panel: explanation + controls -->
     <aside class="panel">
       <div id="level-info" class="level-info"></div>
 
       <div class="controls">
-        <!-- Level 1 controls -->
+        <!-- level 1 controls -->
         <label class="ctl" data-levels="1">
           <span>Grid resolution</span>
           <select data-key="gridN">
@@ -53,7 +65,7 @@
           <button type="button" id="reroll">Randomize again</button>
         </div>
 
-        <!-- Level 2 controls -->
+        <!-- level 2 controls -->
         <label class="ctl" data-levels="2">
           <span>Image sampling resolution</span>
           <select data-key="imageRes">
@@ -74,7 +86,7 @@
           <div><img src="wave2.png" class="grayscale" alt="wave2.png as grayscale"><figcaption>Height: its brightness</figcaption></div>
         </figure>
 
-        <!-- Level 3 / 4 controls -->
+        <!-- level 3 + 4 controls -->
         <div class="ctl editor" data-levels="3 4">
           <span>Wave shape: two cubic Bézier curves (drag the dots)</span>
           <canvas id="bezier-editor" width="300" height="150"></canvas>
@@ -110,7 +122,7 @@
           <input type="checkbox" data-key="showPaths"> <span>Show cloud Bézier paths</span>
         </label>
 
-        <!-- Level 4 controls -->
+        <!-- level 4 controls -->
         <label class="ctl check" data-levels="4">
           <input type="checkbox" data-key="lighting" checked> <span>Sun lighting (diffuse + specular)</span>
         </label>
@@ -134,7 +146,7 @@
           <input type="checkbox" data-key="dayCycle"> <span>Animate day / night</span>
         </label>
 
-        <!-- Camera controls (every level) -->
+        <!-- camera controls (every level) -->
         <h3>Camera</h3>
         <label class="ctl check">
           <input type="checkbox" data-key="autoOrbit" checked> <span>Orbit around the center (look-at 0,0,0)</span>
