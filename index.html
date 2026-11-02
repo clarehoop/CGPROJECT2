@@ -1,15 +1,155 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>WebGL Cube Grid</title>
-  <style>
-    html, body { margin: 0; height: 100%; background: black; overflow: hidden; }
-    canvas { display: block; width: 100%; height: 100%; }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cube World: Ocean in Motion</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <canvas id="c"></canvas>
+  <!-- ================= HEADER: title, name, project info ================= -->
+  <header class="site-header">
+    <div class="title-block">
+      <h1>Cube World <span>· Ocean in Motion</span></h1>
+      <p class="byline">Clare Hooper · Intro to Computer Graphics · Project 2</p>
+    </div>
+    <p class="about">
+      A seascape made only from cubes, drawn with plain WebGL (no libraries).
+      Waves roll in on Bézier curves and clouds drift across the sky on Bézier paths.
+      <strong>Note:</strong> the highest resolutions need a fairly powerful computer.
+    </p>
+  </header>
+
+  <!-- ================= LEVEL TABS (filled in by index.js) ================= -->
+  <nav id="tabs" class="tabs" aria-label="Project levels"></nav>
+
+  <main class="layout">
+    <!-- ================= THE 3D VIEW ================= -->
+    <section class="viewport">
+      <canvas id="glcanvas"></canvas>
+      <div id="hud" class="hud"></div>
+      <div id="status" class="status" hidden></div>
+      <p class="hint">Drag to orbit · scroll to zoom</p>
+    </section>
+
+    <!-- ================= SIDE PANEL: explanation + controls ================= -->
+    <aside class="panel">
+      <div id="level-info" class="level-info"></div>
+
+      <div class="controls">
+        <!-- Level 1 controls -->
+        <label class="ctl" data-levels="1">
+          <span>Grid resolution</span>
+          <select data-key="gridN">
+            <option value="10">10 × 10</option>
+            <option value="25">25 × 25</option>
+            <option value="50" selected>50 × 50</option>
+            <option value="100">100 × 100</option>
+            <option value="200">200 × 200</option>
+            <option value="400">400 × 400 (heavy)</option>
+          </select>
+        </label>
+        <div class="ctl" data-levels="1">
+          <button type="button" id="reroll">Randomize again</button>
+        </div>
+
+        <!-- Level 2 controls -->
+        <label class="ctl" data-levels="2">
+          <span>Image sampling resolution</span>
+          <select data-key="imageRes">
+            <option value="50">50 cubes wide</option>
+            <option value="100" selected>100 cubes wide</option>
+            <option value="150">150 cubes wide</option>
+            <option value="200">200 cubes wide</option>
+            <option value="300">300 cubes wide (heavy)</option>
+            <option value="400">400 cubes wide (target, heavy)</option>
+          </select>
+        </label>
+        <label class="ctl" data-levels="1 2">
+          <span>Height scale <output data-out="heightScale"></output></span>
+          <input type="range" data-key="heightScale" min="2" max="30" step="1" value="12">
+        </label>
+        <figure class="ctl previews" data-levels="2">
+          <div><img src="wave2.png" alt="wave2.png colors"><figcaption>Color: wave2.png</figcaption></div>
+          <div><img src="wave2.png" class="grayscale" alt="wave2.png as grayscale"><figcaption>Height: its brightness</figcaption></div>
+        </figure>
+
+        <!-- Level 3 / 4 controls -->
+        <div class="ctl editor" data-levels="3 4">
+          <span>Wave shape: two cubic Bézier curves (drag the dots)</span>
+          <canvas id="bezier-editor" width="300" height="150"></canvas>
+          <button type="button" id="reset-wave">Reset wave shape</button>
+        </div>
+        <label class="ctl" data-levels="3 4">
+          <span>Sea resolution</span>
+          <select data-key="seaRes">
+            <option value="60">60 × 60</option>
+            <option value="100">100 × 100</option>
+            <option value="140" selected>140 × 140</option>
+            <option value="200">200 × 200</option>
+            <option value="260">260 × 260 (heavy)</option>
+          </select>
+        </label>
+        <label class="ctl" data-levels="3 4">
+          <span>Image height (wave2.png) <output data-out="imageSeaScale"></output></span>
+          <input type="range" data-key="imageSeaScale" min="0" max="15" step="0.5" value="4">
+        </label>
+        <label class="ctl" data-levels="3 4">
+          <span>Wave height <output data-out="waveAmp"></output></span>
+          <input type="range" data-key="waveAmp" min="1" max="16" step="0.5" value="7">
+        </label>
+        <label class="ctl" data-levels="3 4">
+          <span>Wave speed <output data-out="waveSpeed"></output></span>
+          <input type="range" data-key="waveSpeed" min="0" max="25" step="0.5" value="8">
+        </label>
+        <label class="ctl" data-levels="3 4">
+          <span>Clouds <output data-out="cloudCount"></output></span>
+          <input type="range" data-key="cloudCount" min="0" max="20" step="1" value="9">
+        </label>
+        <label class="ctl check" data-levels="3 4">
+          <input type="checkbox" data-key="showPaths"> <span>Show cloud Bézier paths</span>
+        </label>
+
+        <!-- Level 4 controls -->
+        <label class="ctl check" data-levels="4">
+          <input type="checkbox" data-key="lighting" checked> <span>Sun lighting (diffuse + specular)</span>
+        </label>
+        <label class="ctl check" data-levels="4">
+          <input type="checkbox" data-key="fog" checked> <span>Atmospheric fog</span>
+        </label>
+        <label class="ctl check" data-levels="4">
+          <input type="checkbox" data-key="skybox" checked> <span>Skybox + sun</span>
+        </label>
+        <label class="ctl check" data-levels="4">
+          <input type="checkbox" data-key="extras" checked> <span>Boat and seagulls</span>
+        </label>
+        <label class="ctl check" data-levels="4">
+          <input type="checkbox" data-key="storm"> <span>Storm (rain + lightning)</span>
+        </label>
+        <label class="ctl" data-levels="4">
+          <span>Sun angle <output data-out="sunAngle"></output></span>
+          <input type="range" data-key="sunAngle" min="0" max="360" step="1" value="35">
+        </label>
+        <label class="ctl check" data-levels="4">
+          <input type="checkbox" data-key="dayCycle"> <span>Animate day / night</span>
+        </label>
+
+        <!-- Camera controls (every level) -->
+        <h3>Camera</h3>
+        <label class="ctl check">
+          <input type="checkbox" data-key="autoOrbit" checked> <span>Orbit around the center (look-at 0,0,0)</span>
+        </label>
+        <label class="ctl">
+          <span>Orbit speed <output data-out="orbitSpeed"></output></span>
+          <input type="range" data-key="orbitSpeed" min="0" max="1" step="0.05" value="0.15">
+        </label>
+        <div class="ctl">
+          <button type="button" id="reset-camera">Reset camera</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
   <script src="index.js"></script>
 </body>
 </html>

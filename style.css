@@ -1,0 +1,370 @@
+/* =====================================================================
+   Apple-style look: system font, frosted glass, rounded cards,
+   segmented-control tabs, iOS switches. Follows the system light/dark mode.
+   ===================================================================== */
+:root {
+  --bg: #f5f5f7;
+  --card: #ffffff;
+  --text: #1d1d1f;
+  --secondary: #6e6e73;
+  --separator: rgba(60, 60, 67, 0.14);
+  --fill: rgba(118, 118, 128, 0.12);
+  --fill-strong: rgba(118, 118, 128, 0.2);
+  --accent: #0071e3;
+  --accent-soft: rgba(0, 113, 227, 0.1);
+  --segment-active: #ffffff;
+  --glass: rgba(255, 255, 255, 0.72);
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
+  --switch-on: #34c759;
+  --code-bg: rgba(118, 118, 128, 0.12);
+
+  /* Colors for the Bézier wave editor (read by index.js) */
+  --editor-bg: #f5f5f7;
+  --editor-grid: #d2d2d7;
+  --editor-polygon: #8e8e93;
+  --editor-curve: #0071e3;
+  --editor-fill: rgba(0, 113, 227, 0.14);
+  --editor-handle: #ff9f0a;
+  --editor-crest: #1d1d1f;
+  --editor-end: #aeaeb2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --card: #1c1c1e;
+    --text: #f5f5f7;
+    --secondary: #98989d;
+    --separator: rgba(84, 84, 88, 0.6);
+    --fill: rgba(118, 118, 128, 0.24);
+    --fill-strong: rgba(118, 118, 128, 0.36);
+    --accent: #2997ff;
+    --accent-soft: rgba(41, 151, 255, 0.16);
+    --segment-active: #636366;
+    --glass: rgba(22, 22, 23, 0.72);
+    --shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+    --switch-on: #30d158;
+    --code-bg: rgba(118, 118, 128, 0.24);
+
+    --editor-bg: #2c2c2e;
+    --editor-grid: #3a3a3c;
+    --editor-polygon: #8e8e93;
+    --editor-curve: #2997ff;
+    --editor-fill: rgba(41, 151, 255, 0.2);
+    --editor-handle: #ff9f0a;
+    --editor-crest: #ffffff;
+    --editor-end: #636366;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+}
+
+body { display: flex; flex-direction: column; }
+
+/* ---------- Header: frosted glass bar ---------- */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 40px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  background: var(--glass);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--separator);
+}
+.site-header h1 {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+.site-header h1 span { color: var(--secondary); font-weight: 600; }
+.byline { margin: 2px 0 0; color: var(--secondary); font-size: 0.85rem; }
+.about { margin: 0; max-width: 560px; color: var(--secondary); font-size: 0.82rem; line-height: 1.45; }
+.about strong { color: var(--text); font-weight: 600; }
+
+/* ---------- Tabs: segmented control ---------- */
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin: 14px auto 0;
+  padding: 2px;
+  max-width: calc(100% - 32px);
+  border-radius: 9px;
+  background: var(--fill);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button {
+  flex: none;
+  padding: 6px 16px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.tabs button:hover:not(.active) { background: var(--fill); }
+.tabs button.active {
+  background: var(--segment-active);
+  font-weight: 600;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 3px 1px rgba(0, 0, 0, 0.04);
+}
+
+/* ---------- Main layout ---------- */
+.layout {
+  flex: 1;
+  display: flex;
+  gap: 16px;
+  min-height: 0;
+  padding: 14px 16px 16px;
+}
+
+/* The 3D view sits in a rounded card */
+.viewport {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #0f1720;
+  box-shadow: var(--shadow);
+}
+#glcanvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+#glcanvas:active { cursor: grabbing; }
+
+/* Floating frosted pills over the 3D view */
+.hud, .status, .hint {
+  position: absolute;
+  margin: 0;
+  padding: 5px 12px;
+  border-radius: 980px;
+  background: rgba(30, 30, 32, 0.55);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  color: #f5f5f7;
+  font-size: 0.78rem;
+  font-weight: 500;
+  pointer-events: none;
+}
+.hud { top: 12px; left: 12px; font-variant-numeric: tabular-nums; }
+.hint { bottom: 12px; left: 12px; color: rgba(245, 245, 247, 0.8); }
+.status {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 80%;
+  padding: 14px 20px;
+  border-radius: 14px;
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+/* ---------- Side panel: grouped cards like iOS Settings ---------- */
+.panel {
+  width: 350px;
+  flex: none;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.level-info, .controls {
+  background: var(--card);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+
+.level-info { padding: 18px 20px 8px; }
+.level-info h2 { margin: 0 0 8px; font-size: 1.15rem; font-weight: 700; letter-spacing: -0.02em; }
+.level-info p, .level-info li { font-size: 0.85rem; line-height: 1.5; color: var(--secondary); }
+.level-info b { color: var(--text); font-weight: 600; }
+.level-info ul { padding-left: 18px; margin: 6px 0 12px; }
+.level-info li { margin-bottom: 6px; }
+.level-info code {
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 0.78rem;
+  color: var(--text);
+  background: var(--code-bg);
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+
+.controls { padding: 4px 0; }
+
+/* Each control is a row, separated by a hairline */
+.ctl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 20px;
+  font-size: 0.88rem;
+  border-top: 1px solid var(--separator);
+}
+.controls > .ctl:first-child,
+.controls > [hidden] + .ctl:not([hidden]) { border-top: none; }
+.ctl[hidden] { display: none; }
+.ctl > span { color: var(--text); display: flex; justify-content: space-between; }
+.ctl output { color: var(--secondary); font-variant-numeric: tabular-nums; }
+
+.controls h3 {
+  margin: 0;
+  padding: 18px 20px 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--secondary);
+  border-top: 1px solid var(--separator);
+}
+.controls h3 + .ctl { border-top: none; }
+
+/* ---------- iOS-style switch (checkbox rows: text left, switch right) ---------- */
+.ctl.check {
+  flex-direction: row-reverse;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+.ctl.check span { color: var(--text); }
+.ctl.check input {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  position: relative;
+  width: 51px;
+  height: 31px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--fill-strong);
+  cursor: pointer;
+  transition: background 0.25s;
+}
+.ctl.check input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 3px 1px rgba(0, 0, 0, 0.06);
+  transition: transform 0.25s;
+}
+.ctl.check input:checked { background: var(--switch-on); }
+.ctl.check input:checked::after { transform: translateX(20px); }
+
+/* ---------- Pop-up menus ---------- */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  padding: 8px 32px 8px 12px;
+  border: none;
+  border-radius: 10px;
+  background: var(--fill) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='14' viewBox='0 0 10 14'%3E%3Cpath d='M1 5l4-4 4 4M1 9l4 4 4-4' fill='none' stroke='%238e8e93' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+/* ---------- Buttons: soft tinted pill ---------- */
+button {
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 500;
+  padding: 9px 16px;
+  border: none;
+  border-radius: 980px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.1s;
+}
+button:hover { filter: brightness(0.95); }
+button:active { transform: scale(0.98); }
+
+/* ---------- Sliders ---------- */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fill-strong);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 24px;
+  height: 24px;
+  margin-top: -10px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+}
+input[type="range"]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--fill-strong); }
+input[type="range"]::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--accent); }
+input[type="range"]::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+/* ---------- Bézier editor + image previews ---------- */
+#bezier-editor {
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  background: var(--editor-bg);
+  touch-action: none;
+  cursor: crosshair;
+}
+.editor > span { color: var(--secondary); font-size: 0.8rem; }
+
+.previews { flex-direction: row; gap: 10px; }
+.previews div { flex: 1; min-width: 0; }
+.previews img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; display: block; }
+.previews img.grayscale { filter: grayscale(1); }
+.previews figcaption { margin-top: 4px; font-size: 0.75rem; color: var(--secondary); text-align: center; }
+
+/* ---------- Small screens: stack the panel under the view ---------- */
+@media (max-width: 800px) {
+  .site-header { position: static; padding: 12px 16px; }
+  .layout { flex-direction: column; padding: 12px 16px; }
+  .viewport { flex: none; height: 60vh; }
+  .panel { width: 100%; overflow: visible; }
+}
