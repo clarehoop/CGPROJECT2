@@ -5,58 +5,51 @@ const gl = canvas.getContext('webgl');
 
 
 const vertexShaderSource = `
-  attribute vec3 aPosition;   // corner position of the cube (model space)
-  attribute vec3 aNormal;     // direction the face is pointing
+  // Per-vertex inputs (filled from buffers we upload in Step 4).
+  attribute vec3 a_position;  // corner position in the object's own space
+  attribute float a_shade;    // brightness of the face this corner belongs to
 
-  uniform mat4 uModel;        // moves/scales THIS cube into the world
-  uniform mat4 uView;         // where the camera is and where it looks
-  uniform mat4 uProjection;   // perspective: far things look smaller
+  // Same-for-the-whole-object inputs (set from JavaScript before each draw).
+  uniform mat4 u_model;       // object space -> world space
+  uniform mat4 u_view;        // world space  -> camera space  (THE CAMERA)
+  uniform mat4 u_projection;  // camera space -> clip space    (perspective)
 
-  varying vec3 vNormal;       // handed to the fragment shader
+  // Output passed along to the fragment shader.
+  varying float v_shade;
 
   void main() {
-    // Turn the normal the same way the cube is turned. Our cubes are only
-    // stretched and moved, never rotated, so this changes nothing here.
-    // It would matter if you added rotation.
-    vNormal = normalize(mat3(uModel) * aNormal);
+    // vec4(a_position, 1.0) turns the 3D point (x, y, z) into the 4D point
+    // (x, y, z, 1). The extra 1 is needed so a 4x4 matrix can TRANSLATE
+    // (move) the point, not just rotate/scale it.
+    //
+    // Read the multiplication from RIGHT to LEFT: first model, then view,
+    // then projection. gl_Position is a built-in output: the final position.
+    gl_Position = u_projection * u_view * u_model * vec4(a_position, 1.0);
 
-    // model -> world -> camera -> screen.
-    // Read right to left: first place the cube in the world (uModel),
-    // then view it from the camera (uView), then apply perspective (uProjection).
-    gl_Position = uProjection * uView * uModel * vec4(aPosition, 1.0);
+    v_shade = a_shade;
   }
 `;
 
 const fragmentShaderSource = `
-  precision mediump float;    // how accurate decimal numbers are (medium is plenty)
+  // Fragment shaders must say how precise their decimal numbers are.
+  // "mediump" (medium precision) is plenty for colors.
+  precision mediump float;
 
-  uniform vec3 uColor;        // this cube's color (red, green, blue: 0..1)
-  varying vec3 vNormal;       // received from the vertex shader
+  uniform vec3 u_color;   // the object's base color (red, green, blue in 0..1)
+  varying float v_shade;  // received from the vertex shader
 
   void main() {
-    // This runs once for EVERY PIXEL inside each triangle. The GPU blends
-    // vNormal between the triangle's three corners, so each pixel gets
-    // its own value. On a flat cube face all corners share the same
-    // normal, so every pixel on that face gets the same one.
-
-    // Simple lighting so we can tell the faces of a cube apart.
-    // The light shines from above and slightly to the side.
-    vec3 lightDirection = normalize(vec3(0.5, 1.0, 0.3));
-
-    // dot() measures how closely two directions line up:
-    //   1 = the face points straight at the light (brightest)
-    //   0 = the face is sideways to the light
-    //   negative = the face points away, so max() clamps it to 0 (dark)
-    float brightness = max(dot(vNormal, lightDirection), 0.0);
-
-    // Keep 30% "ambient" light so faces in shadow aren't pure black.
-    float light = 0.3 + 0.7 * brightness;
-
-    // gl_FragColor is the built-in output: the final color of this pixel.
-    // Multiplying the cube's color by light darkens it on dim faces.
-    gl_FragColor = vec4(uColor * light, 1.0);   // 1.0 = fully opaque
+    // Darken the base color by the face's shade so each side of a box looks
+    // a little different. Without this, a box would look like a flat
+    // silhouette and you could not tell it is 3D. (This is a cheap stand-in
+    // for real lighting, which is a topic for another day.)
+    //
+    // gl_FragColor is a built-in output: (red, green, blue, alpha/opacity).
+    gl_FragColor = vec4(u_color * v_shade, 1.0);
   }
 `;
+
+
 
 // Compile one shader and report any GLSL errors.
 function compileShader(type, source) {
@@ -77,6 +70,12 @@ gl.attachShader(program, compileShader(gl.FRAGMENT_SHADER, fragmentShaderSource)
 gl.linkProgram(program);
 gl.useProgram(program);
 
+const a_position   = gl.getAttribLocation(program, 'a_position');
+const a_shade      = gl.getAttribLocation(program, 'a_shade');
+const u_model      = gl.getUniformLocation(program, 'u_model');
+const u_view       = gl.getUniformLocation(program, 'u_view');
+const u_projection = gl.getUniformLocation(program, 'u_projection');
+const u_color      = gl.getUniformLocation(program, 'u_color');
 
 
 const cubeVertices = new Float32Array([
@@ -191,11 +190,11 @@ const uColor = gl.getUniformLocation(program, 'uColor');
 //    ground plane (y = 0), centered on the origin.
 // ---------------------------------------------------------------------
 // const GRID_SIZE = 1000;   //bigger
-const GRID_SIZE = 3000;  
+const GRID_SIZE = 500;  
 const SPACING = 1.0;
 
 
-const HEIGHT_SCALE = 8;
+const HEIGHT_SCALE = 15;
 let cubes = [];
 
 function generateMapsFromImage(imageSrc, size) {
@@ -335,110 +334,181 @@ function lookAt(eye, target, up) {
 }
 
 
-// ---------------------------------------------------------------------
-// 5. DRAW
-//    Everything above was SETUP: it ran once and got the shaders, the
-//    buffer, and the list of cubes ready. draw() is where we actually
-//    produce a picture. It follows the same steps every time:
-//
-//      a. size the drawing area to match the window
-//      b. wipe the previous picture
-//      c. set the camera
-//      d. for each cube: set its uniforms, then tell the GPU to draw
-//
-//    Note that we never send the cube's triangles again here - they
-//    are already sitting in the GPU buffer. Each cube costs us only a
-//    few uniforms plus one draw call.
-// ---------------------------------------------------------------------
-function draw() {
-  // --- a. Size the drawing area -------------------------------------
-  // A canvas has two sizes: how big it looks on the page (set by CSS),
-  // and how many pixels it actually has. If they don't match, the
-  // picture gets stretched and blurry, so we make them match.
-  canvas.width = canvas.clientWidth;
-  canvas.height = canvas.clientHeight;
+// -----------------------------------------------------------------------------
+// Step 7. The animation loop.
+// -----------------------------------------------------------------------------
 
-  // The viewport tells WebGL which rectangle of the canvas to draw
-  // into. After projection, the shader's output positions run from -1
-  // to +1 on each axis; the viewport maps that range onto real pixels
-  // (here, the whole canvas).
-  gl.viewport(0, 0, canvas.width, canvas.height);
+// Camera orbit settings. Try changing these!
+const ORBIT_RADIUS = 9.0;          // distance from the center of the scene
+const ORBIT_HEIGHT = 4.0;          // how high above the floor the camera is
+const ORBIT_SPEED  = 0.3;          // radians per second (~21 s per full circle)
+const LOOK_AT      = [0, 0.5, 0];  // the point the camera always faces
+const UP           = [0, 1, 0];    // "up" is the +Y direction
 
-  // --- b. Wipe the previous picture ---------------------------------
-  // clearColor only CHOOSES the color to clear with: black
-  // (red, green, blue, alpha). Nothing is cleared until gl.clear().
-  gl.clearColor(0, 0, 0, 1);
+// Turn on the depth test. Without it, triangles are simply painted in the
+// order we draw them, so a far box drawn later would cover a nearer one.
+// With it, the GPU keeps a "depth buffer" that remembers how far away each
+// pixel's current color is, and only lets nearer pixels win.
+gl.enable(gl.DEPTH_TEST);
 
-  // Depth testing makes near cubes hide far cubes, no matter which
-  // order we draw them in. Each frame we clear the depth info too.
-  //
-  // How it works: alongside the colors, WebGL keeps a DEPTH BUFFER that
-  // stores, for every pixel, how far away the closest thing drawn there
-  // so far is. When a new pixel arrives, WebGL compares its distance to
-  // the stored one and only keeps it if it is closer.
-  gl.enable(gl.DEPTH_TEST);
+// Background color (red, green, blue, alpha): a dark blue-gray.
+gl.clearColor(0.1, 0.12, 0.16, 1.0);
 
-  // Erase both the colors (to black) and the depth info (to "nothing
-  // drawn yet") so the last picture doesn't leak into this one.
-  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-  // --- c. Set the camera --------------------------------------------
-  // The camera is the same for every cube, so set it once.
-  //
-  // Projection: a 45° (PI / 4) field of view, the canvas's aspect ratio
-  // so cubes aren't squashed, and a visible range from 0.1 to 100 units
-  // away from the camera. Anything outside that range is not drawn.
-  const aspect = canvas.width / canvas.height;
-  const dist = GRID_SIZE;
-  gl.uniformMatrix4fv(uProjection, false, perspective(Math.PI / 4, aspect, 0.1, dist * 4));
-
-  // View: the camera sits at (14, 14, 18) - up and off to one side -
-  // looks at the center of the grid (0, 0, 0), and +y is "up".
-  // Try changing the first triple to move the camera around!
-  //
-  // (The `false` argument means "don't transpose the matrix".
-  // WebGL requires it to be false.)
-  gl.uniformMatrix4fv(uView, false, lookAt(
-    [GRID_SIZE * 0.8, GRID_SIZE * 0.8, GRID_SIZE * 1.0],
-    [0, 0, 0], [0, 1, 0]));
-
-  // --- d. Draw every cube -------------------------------------------
-  // Draw every cube: same triangles each time, different uniforms.
-  for (const cube of cubes) {
-    // Build this cube's model matrix.
-    // First stretch the cube to its height, then move it to its spot.
-    // (In multiply(a, b), b happens first, so scaling goes on the right.)
-    // y stays 0 in the translation because the cube's bottom already
-    // sits at y = 0, so stretching it makes it grow upward.
-    const model = multiply(
-      translation(cube.x, 0, cube.z),
-      scaling(1, cube.height, 1),
-    );
-
-    // Send this cube's uniforms to the shaders. They stay set until we
-    // change them, so the next cube simply overwrites them.
-    gl.uniformMatrix4fv(uModel, false, model);
-    gl.uniform3fv(uColor, cube.color);   // 3fv = a vector of 3 floats
-
-    // The actual draw call: "read VERTEX_COUNT (36) vertices from the
-    // buffer, starting at vertex 0, and treat every 3 as a triangle."
-    // For this call the GPU:
-    //   1. runs the vertex shader once per vertex (36 times) to find
-    //      where each corner lands on the screen
-    //   2. figures out which pixels each triangle covers
-    //   3. runs the fragment shader once per covered pixel to color it
-    //   4. uses the depth test to keep only the closest pixels
-    gl.drawArrays(gl.TRIANGLES, 0, VERTEX_COUNT);
+// The canvas has two sizes: its size on screen (set by CSS) and the number of
+// pixels WebGL draws into (canvas.width / canvas.height). We keep them equal
+// so the image is sharp, and tell WebGL to use the whole canvas (viewport).
+function resizeCanvas() {
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
   }
+  gl.viewport(0, 0, canvas.width, canvas.height);
 }
 
-// Draw the scene once when the page loads. Nothing moves, so we don't
-// need to redraw again unless something changes.
-draw();
+// render() draws ONE frame. requestAnimationFrame asks the browser to call it
+// again right before the next screen refresh (usually 60 times per second),
+// and passes in the current time in milliseconds.
+function render(timeInMilliseconds) {
+  resizeCanvas();
+  const seconds = timeInMilliseconds / 1000;
 
-// Redraw if the browser window changes size: the canvas has a new
-// shape, so the viewport and aspect ratio must be updated.
-// (To animate, you would instead call draw() every frame with
-// requestAnimationFrame and change something - like the camera -
-// a little each time.)
-window.addEventListener('resize', draw);
+  // --- 1. Move the camera --------------------------------------------------
+  // The camera travels on a circle around the Y axis. A point on a circle of
+  // radius r at angle θ is (r·cos θ, r·sin θ). We make the angle grow with
+  // time, so the camera keeps going around. Here the circle lies in the
+  // horizontal X-Z plane, raised up to ORBIT_HEIGHT.
+  //
+  //   Top-down view:          z
+  //                           |   * camera at angle θ
+  //                           |  /
+  //                           | / r
+  //                           |/ θ
+  //               ------------+------------ x
+  //                         scene
+  const angle = seconds * ORBIT_SPEED;
+  const eye = [
+    ORBIT_RADIUS * Math.cos(angle),
+    ORBIT_HEIGHT,
+    ORBIT_RADIUS * Math.sin(angle),
+  ];
+
+  // Point the camera from `eye` at the center of the scene.
+  const viewMatrix = lookAt(eye, LOOK_AT, UP);
+
+  // The lens: 45° field of view (converted to radians), matched to the canvas
+  // shape. Objects closer than 0.1 or farther than 100 units are not drawn.
+  const aspect = canvas.width / canvas.height;
+  const projectionMatrix = perspective(45 * Math.PI / 180, aspect, 0.1, 100.0);
+
+  // Send both camera matrices to the shader. They are the same for every
+  // object, so we set them once per frame. (The `false` means "do not
+  // transpose"; WebGL 1 requires it to be false.)
+  gl.uniformMatrix4fv(u_view, false, viewMatrix);
+  gl.uniformMatrix4fv(u_projection, false, projectionMatrix);
+
+  // --- 2. Erase the previous frame -----------------------------------------
+  // Clear both the colors and the depth buffer, or old frames would linger.
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  // --- 3. Draw every object ------------------------------------------------
+  // The cube data is already on the GPU (Step 4). For each object, we only
+  // change its model matrix and color, then draw the same 36 vertices again.
+  unction draw() {
+    // --- a. Size the drawing area -------------------------------------
+    // A canvas has two sizes: how big it looks on the page (set by CSS),
+    // and how many pixels it actually has. If they don't match, the
+    // picture gets stretched and blurry, so we make them match.
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+  
+    // The viewport tells WebGL which rectangle of the canvas to draw
+    // into. After projection, the shader's output positions run from -1
+    // to +1 on each axis; the viewport maps that range onto real pixels
+    // (here, the whole canvas).
+    gl.viewport(0, 0, canvas.width, canvas.height);
+  
+    // --- b. Wipe the previous picture ---------------------------------
+    // clearColor only CHOOSES the color to clear with: black
+    // (red, green, blue, alpha). Nothing is cleared until gl.clear().
+    gl.clearColor(0, 0, 0, 1);
+  
+    // Depth testing makes near cubes hide far cubes, no matter which
+    // order we draw them in. Each frame we clear the depth info too.
+    //
+    // How it works: alongside the colors, WebGL keeps a DEPTH BUFFER that
+    // stores, for every pixel, how far away the closest thing drawn there
+    // so far is. When a new pixel arrives, WebGL compares its distance to
+    // the stored one and only keeps it if it is closer.
+    gl.enable(gl.DEPTH_TEST);
+  
+    // Erase both the colors (to black) and the depth info (to "nothing
+    // drawn yet") so the last picture doesn't leak into this one.
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  
+    // --- c. Set the camera --------------------------------------------
+    // The camera is the same for every cube, so set it once.
+    //
+    // Projection: a 45° (PI / 4) field of view, the canvas's aspect ratio
+    // so cubes aren't squashed, and a visible range from 0.1 to 100 units
+    // away from the camera. Anything outside that range is not drawn.
+    const aspect = canvas.width / canvas.height;
+    gl.uniformMatrix4fv(uProjection, false, perspective(Math.PI / 4, aspect, 0.1, 100));
+  
+    // View: the camera sits at (14, 14, 18) - up and off to one side -
+    // looks at the center of the grid (0, 0, 0), and +y is "up".
+    // Try changing the first triple to move the camera around!
+    //
+    // (The `false` argument means "don't transpose the matrix".
+    // WebGL requires it to be false.)
+    gl.uniformMatrix4fv(uView, false, lookAt([14, 14, 18], [0, 0, 0], [0, 1, 0]));
+  
+    // --- d. Draw every cube -------------------------------------------
+    // Draw every cube: same triangles each time, different uniforms.
+    for (const cube of cubes) {
+      // Build this cube's model matrix.
+      // First stretch the cube to its height, then move it to its spot.
+      // (In multiply(a, b), b happens first, so scaling goes on the right.)
+      // y stays 0 in the translation because the cube's bottom already
+      // sits at y = 0, so stretching it makes it grow upward.
+      const model = multiply(
+        translation(cube.x, 0, cube.z),
+        scaling(1, cube.height, 1),
+      );
+  
+      // Send this cube's uniforms to the shaders. They stay set until we
+      // change them, so the next cube simply overwrites them.
+      gl.uniformMatrix4fv(uModel, false, model);
+      gl.uniform3fv(uColor, cube.color);   // 3fv = a vector of 3 floats
+  
+      // The actual draw call: "read VERTEX_COUNT (36) vertices from the
+      // buffer, starting at vertex 0, and treat every 3 as a triangle."
+      // For this call the GPU:
+      //   1. runs the vertex shader once per vertex (36 times) to find
+      //      where each corner lands on the screen
+      //   2. figures out which pixels each triangle covers
+      //   3. runs the fragment shader once per covered pixel to color it
+      //   4. uses the depth test to keep only the closest pixels
+      gl.drawArrays(gl.TRIANGLES, 0, VERTEX_COUNT);
+    }
+  }
+  
+  // Draw the scene once when the page loads. Nothing moves, so we don't
+  // need to redraw again unless something changes.
+  draw();
+  
+  // Redraw if the browser window changes size: the canvas has a new
+  // shape, so the viewport and aspect ratio must be updated.
+  // (To animate, you would instead call draw() every frame with
+  // requestAnimationFrame and change something - like the camera -
+  // a little each time.)
+  window.addEventListener('resize', draw);
+  
+
+  // --- 4. Ask for the next frame -------------------------------------------
+  requestAnimationFrame(render);
+}
+
+// Start the loop.
+requestAnimationFrame(render);
