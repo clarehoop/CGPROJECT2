@@ -20,13 +20,11 @@
   <!-- header: title, name, project info -->
   <header class="site-header">
     <div class="title-block">
-      <h1>Cube World <span>· Ocean in Motion</span></h1>
+      <h1>Cube World <span>· Ocean Waves</span></h1>
       <p class="byline">Clare Hooper · Intro to Computer Graphics · Project 2</p>
     </div>
     <p class="about">
-      A seascape made only from cubes, drawn with plain WebGL (no libraries).
-      Waves roll in on Bézier curves and clouds drift across the sky on Bézier paths.
-      <strong>Note:</strong> the highest resolutions need a fairly powerful computer.
+      A seascape made only from cubes, drawn with WebGL
     </p>
   </header>
 
@@ -48,7 +46,12 @@
     <aside class="panel">
       <div id="level-info" class="level-info"></div>
 
-      <div class="controls">
+      <!-- button to show / hide the controls (they start hidden) -->
+      <button type="button" id="toggle-controls" class="controls-toggle" aria-expanded="false" aria-controls="controls">
+        <span>Controls</span><span class="chevron" aria-hidden="true"></span>
+      </button>
+
+      <div class="controls" id="controls" hidden>
         <!-- level 1 controls -->
         <label class="ctl" data-levels="1">
           <span>Grid resolution</span>

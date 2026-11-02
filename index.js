@@ -594,7 +594,7 @@ function averageBlock(img, u0, v0, u1, v1, out) {
 }
 
 // samples the image into an N x N grid. wave2.png is 882 x 620 (not square)
-// so I crop the middle 620 x 620 square, that way the grid is square and the
+// so I cropped the middle 620 x 620 square, that way the grid is square and the
 // picture doesn't get stretched. gives back a color and brightness (0-1) per cell
 const sampleCache = {};
 function sampleSquare(img, N) {
@@ -612,7 +612,7 @@ function sampleSquare(img, N) {
         uStart + ((col + 1) / N) * uSize, vStart + ((row + 1) / N) * vSize, c);
       const i = row * N + col;
       colors[i * 3] = c[0]; colors[i * 3 + 1] = c[1]; colors[i * 3 + 2] = c[2];
-      // luminance = how bright it looks to your eye, 0 to 1
+      // luminance = 0 to 1
       brightness[i] = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
     }
   }
@@ -1081,72 +1081,27 @@ const LEVELS = {
   '0': {
     tab: 'Level 0 · Cube',
     camera: { radius: 8, pitch: 0.45, target: [0, 0, 0], minR: 3, maxR: 40 },
-    info: `<h2>Level 0: a single cube</h2>
-      <p>One 2 × 2 × 2 cube centered on the origin. The model is a unit cube
-      (36 vertices = 6 faces × 2 triangles × 3 corners). Its model matrix
-      scales it by 2 and translates it down by 1 so its center sits at (0, 0, 0).</p>
-      <ul><li><b>Pinhole camera:</b> lookAt(eye, target, up) + perspective projection.</li>
-      <li>Each face gets a fixed brightness so the cube reads as 3D.</li></ul>`,
+    info: `<h2>Level 0: a single cube</h2>`,
   },
   '1': {
     tab: 'Level 1 · Randomized color and height grid',
     camera: { radius: 115, pitch: 0.5, target: [0, 2, 0], minR: 10, maxR: 400 },
-    info: `<h2>Level 1: randomized cube landscape</h2>
-      <ul><li><b>1a Translation:</b> the same cube is copied into a grid on the x-z
-      plane. The landscape is always 100
-      units wide, so a higher resolution means more, smaller cubes. All copies
-      are drawn in <b>one draw call</b> (instancing); watch the frame rate.</li>
-      <li><b>1b Scaling:</b> each cube is stretched in y by a random amount. The
-      model's bottom sits at y = 0, so it grows upward.
-      <li><b>1c Vertex colors:</b> the 4 top corners get a random color and the
-      4 bottom corners a darker random color. The GPU <b>interpolates</b> between
-      them, so each side shows a gradient.</li>
-      <li><b>1d Camera path:</b> the camera moves on a circle,
-      eye = (r cos θ, h, r sin θ), with θ growing over time, and always
-      looks at the center. Drag to move it yourself.</li></ul>`,
+    info: `<h2>Level 1: randomized cube landscape</h2>`,
   },
   '2': {
     tab: 'Level 2 · Wave Image',
     camera: { radius: 115, pitch: 0.6, target: [0, 2, 0], minR: 10, maxR: 400 },
-    info: `<h2>Level 2: landscape from an image</h2>
-      <p>My wave image is read with getImageData. I used it as both the color map and the height map as well. The white foam of the image making the cubes taller, and the dark ocean indicated a low height.</p>
-      <ul><li><b>Square grid:</b> the image is 882 × 620, so I cropped it to a 
-      620 × 620 square.</li>
-      <li><b>Sampling:</b> each cube covers a block of pixels (620 px on a
-      100-cube grid ≈ 6 × 6 pixels). The cube takes the <b>average</b> of that
-      block.</li>
-      <li>Start at a low resolution and step up to 400 cubes wide on a fast computer.</li></ul>`,
+    info: `<h2>Level 2: landscape from an image</h2>`,
   },
   '3': {
     tab: 'Level 3 · Bézier sea + clouds',
     camera: { radius: 110, pitch: 0.28, target: [0, 12, 0], minR: 10, maxR: 400 },
-    info: `<h2>Level 3: Bézier waves and clouds</h2>
-      <p><b>Sea = image + Bézier wave.</b> Each sea cube's height is</p>
-      <p>height = brightness(wave2.png) × imageHeight + wave(x, z, time)</p>
-      <ul><li><b>Image part:</b> the whirlpool from Level 2 gives the still surface and
-      the colors.</li>
-      <li><b>Bézier part:</b> one wavelength is two cubic Bézier curves,
-      <code>B(t) = (1−t)³P0 + 3(1−t)²t P1 + 3(1−t)t² P2 + t³P3</code>: a gentle back
-      and a steep front. Every frame it is evaluated at
-      <code>(x − speed·time) / wavelength</code>, so the wave rolls across the image.
-      A 1D Bézier bends the crest line, and cubes near a crest turn to white foam.
-      Drag the dots below to reshape the wave.</li></ul>
-      <p><b>Clouds:</b> 5-10 cubes each, scaled, rotated and translated into a puff.
-      Each cloud follows a 3D cubic Bézier path, turns to face its tangent
-      <code>B'(t)</code>, and returns to the start when it drifts too far.</p>`,
+    info: `<h2>Level 3: Bézier waves and clouds</h2>`,
   },
   '4': {
     tab: 'Level 4 · Full scene',
     camera: { radius: 85, pitch: 0.2, target: [0, 9, 0], minR: 10, maxR: 380 },
-    info: `<h2>Level 4: light, sky and atmosphere</h2>
-      <ul><li><b>Lighting:</b> Blinn-Phong. Diffuse = max(N·L, 0); specular uses the
-      halfway vector for sun glints on the water.</li>
-      <li><b>Skybox:</b> a huge cube centered on the camera; horizon color on its
-      bottom corners and sky color on top, blended by interpolation.</li>
-      <li><b>Fog:</b> distance-based exponential fog fades the far sea into the horizon.</li>
-      <li><b>Boat:</b> rides the Bézier wave and tilts with the water slope.</li>
-      <li><b>Seagulls:</b> circle on four Bézier quarter-circles; wings flap by rotation.</li>
-      <li><b>Storm:</b> rain cubes, lightning flashes, bigger waves, grey clouds.</li></ul>`,
+    info: `<h2>Level 4: light, sky and atmosphere</h2>`,
   },
 };
 
@@ -1354,6 +1309,14 @@ document.getElementById('reroll').addEventListener('click', () => {
 document.getElementById('reset-camera').addEventListener('click', () => {
   const cfg = LEVELS[state.level].camera;
   Object.assign(camera, cfg, { target: cfg.target.slice(), yaw: 0.8 });
+});
+
+// [NEW] show / hide the controls, they start hidden so the panel is just the level info
+const controlsToggle = document.getElementById('toggle-controls');
+const controlsBox = document.getElementById('controls');
+controlsToggle.addEventListener('click', () => {
+  controlsBox.hidden = !controlsBox.hidden;
+  controlsToggle.setAttribute('aria-expanded', String(!controlsBox.hidden));
 });
 
 // bezier wave editor (2d canvas)

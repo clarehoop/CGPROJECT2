@@ -240,6 +240,36 @@ body { display: flex; flex-direction: column; }
 }
 
 .controls { padding: 4px 0; }
+.controls[hidden] { display: none; }
+
+/* show / hide controls button, looks like an ios settings row */
+.controls-toggle {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 14px 20px;
+  border: none;
+  border-radius: 18px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.controls-toggle:hover { color: var(--accent); }
+.controls-toggle .chevron {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--secondary);
+  border-bottom: 2px solid var(--secondary);
+  transform: rotate(45deg) translateY(-3px);
+  transition: transform 0.2s;
+}
+.controls-toggle[aria-expanded="true"] .chevron { transform: rotate(-135deg) translateX(-3px); }
 
 /* each control is a row with a thin line between */
 .ctl {
