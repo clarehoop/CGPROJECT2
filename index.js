@@ -504,13 +504,73 @@ function oceanColor(n, out) {
 // [CHANGED] you can change the grid size (10 to 400) and it always stays
 //   100 wide so spacing = 100 / N, I also added a small gap between cubes
 //   random comes from a seed so "randomize again" works
-//   each cube gets two random colors (top and bottom) instead of one to
-//   show interpolation
+//   each cube gets two colors (top and bottom) instead of one to show
+//   interpolation
+//
+// [NEW] heights come from fractal noise instead of plain rand() so it looks
+//   like hills and mountains, and the color comes from the height (water,
+//   sand, grass, rock, snow) with a small random tint on every cube
+
+// value noise - random numbers on a coarse grid, then I blend between the
+// 4 corners around each point so the heights change smoothly
+function makeValueNoise(rand, cells) {
+  const grid = [];
+  for (let k = 0; k < (cells + 1) * (cells + 1); k++) grid.push(rand());
+  const fade = t => t * t * (3 - 2 * t);       // smoothstep so there are no sharp creases
+  return function (u, v) {                     // u, v go from 0 to 1 across the grid
+    const gx = u * cells, gz = v * cells;
+    const ix = Math.min(Math.floor(gx), cells - 1), iz = Math.min(Math.floor(gz), cells - 1);
+    const tx = fade(gx - ix), tz = fade(gz - iz);
+    const at = (a, c) => grid[c * (cells + 1) + a];
+    const top = at(ix, iz) + (at(ix + 1, iz) - at(ix, iz)) * tx;
+    const bot = at(ix, iz + 1) + (at(ix + 1, iz + 1) - at(ix, iz + 1)) * tx;
+    return top + (bot - top) * tz;
+  };
+}
+
+// fractal noise (fbm) - I add 5 layers of value noise, each one has twice
+// the detail and half the height of the one before
+// big layers make the mountains, small layers make the bumpy detail
+function makeFractalNoise(rand) {
+  const layers = [];
+  let cells = 3, amp = 1, total = 0;
+  for (let o = 0; o < 5; o++) {
+    layers.push({ noise: makeValueNoise(rand, cells), amp });
+    total += amp;
+    cells *= 2;
+    amp *= 0.5;
+  }
+  return (u, v) => layers.reduce((sum, l) => sum + l.noise(u, v) * l.amp, 0) / total;
+}
+
+// colors for each height, 0 = lowest and 1 = highest, I blend between them
+const TERRAIN_COLORS = [
+  [0.00, [0.10, 0.30, 0.65]],   // deep water
+  [0.30, [0.25, 0.60, 0.85]],   // shallow water
+  [0.36, [0.90, 0.83, 0.60]],   // sand
+  [0.45, [0.35, 0.68, 0.30]],   // grass
+  [0.65, [0.18, 0.45, 0.20]],   // forest
+  [0.80, [0.50, 0.45, 0.42]],   // rock
+  [0.92, [0.97, 0.97, 1.00]],   // snow
+];
+function terrainColor(h) {
+  for (let k = 1; k < TERRAIN_COLORS.length; k++) {
+    const [h1, c1] = TERRAIN_COLORS[k];
+    if (h <= h1) {
+      const [h0, c0] = TERRAIN_COLORS[k - 1];
+      const t = (h - h0) / (h1 - h0);
+      return c0.map((c, j) => c + (c1[j] - c) * t);
+    }
+  }
+  return TERRAIN_COLORS[TERRAIN_COLORS.length - 1][1];
+}
+
 function buildRandomGrid() {
   const N = state.gridN;
   const spacing = WORLD_SIZE / N;
   const size = spacing * 0.85;               // small gap so you can see each cube
   const rand = seededRandom(state.seed);     // same seed = same landscape
+  const noise = makeFractalNoise(rand);
   const b = new CubeBatch(N * N);
 
   let i = 0;
@@ -520,13 +580,19 @@ function buildRandomGrid() {
       const x = (col - (N - 1) / 2) * spacing;
       const z = (row - (N - 1) / 2) * spacing;
 
-      // 1b scaling - stretch in y (orthogonal to x-z) by a random amount
-      const height = 0.3 + rand() * state.heightScale;
+      // 1b scaling - stretch in y (orthogonal to x-z) by the noise height
+      // the noise is mostly between 0.2 and 0.8 so I stretch it to 0 to 1
+      // u, v don't depend on N so a bigger grid is the same land with more detail
+      const n = noise(col / (N - 1), row / (N - 1));
+      const h = Math.min(Math.max((n - 0.2) / 0.6, 0), 1);
+      const height = 0.3 + h * state.heightScale;
 
-      // 1c vertex colors - random color on the top 4 corners, darker random
-      // color on the bottom 4, the shader blends between them up each side
-      const top = [rand(), rand(), rand()];
-      const bottom = [rand() * 0.4, rand() * 0.4, rand() * 0.4];
+      // 1c vertex colors - top color from the height plus a small random
+      // tint, bottom is a darker version, the shader blends up each side
+      const base = terrainColor(h);
+      const tint = (rand() - 0.5) * 0.12;
+      const top = base.map(c => Math.min(Math.max(c + tint, 0), 1));
+      const bottom = top.map(c => c * 0.35);
 
       b.setCube(i++, [x, 0, z], [size, height, size], bottom, top);
     }
@@ -944,10 +1010,9 @@ const sunCube = new CubeBatch(1);
 // boat - a few cubes placed relative to the boat (front = +x)
 const boat = new CubeBatch(6);
 boat.setCube(0, [0, 0, 0], [4.0, 0.9, 1.7], [0.25, 0.13, 0.06], [0.55, 0.32, 0.15]);           // hull
-boat.setCube(1, [2.3, 0.15, 0], [1.0, 0.75, 1.1], [0.25, 0.13, 0.06], [0.55, 0.32, 0.15]);     // bow
-boat.setCube(2, [-0.9, 0.9, 0], [1.4, 0.8, 1.2], [0.85, 0.85, 0.8], [0.98, 0.98, 0.95]);       // cabin
+boat.setCube(1, [2.3, 0.15, 0], [1.0, 0.75, 1.1], [0.25, 0.13, 0.06], [0.55, 0.32, 0.15]);     // bow     // cabin
 boat.setCube(3, [0.5, 0.9, 0], [0.15, 4.5, 0.15], [0.35, 0.2, 0.1], [0.45, 0.28, 0.14]);       // mast
-boat.setCube(4, [1.25, 1.5, 0], [1.3, 3.4, 0.08], [0.88, 0.86, 0.8], [1, 1, 1]);              // sail
+boat.setCube(4, [1.25, 1.5, 0], [1.3, 3.4, 0.08], [0.04, 0.04, 0.05], [0.12, 0.12, 0.14]);              // sail
 boat.setCube(5, [0.85, 5.0, 0], [0.6, 0.4, 0.05], [0.9, 0.15, 0.15], [1, 0.25, 0.2]);         // flag
 let boatPitch = 0, boatRoll = 0;
 
@@ -1084,9 +1149,9 @@ const LEVELS = {
     info: `<h2>Level 0: a single cube</h2>`,
   },
   '1': {
-    tab: 'Level 1 · Randomized color and height grid',
+    tab: 'Level 1 · Randomized terrain',
     camera: { radius: 115, pitch: 0.5, target: [0, 2, 0], minR: 10, maxR: 400 },
-    info: `<h2>Level 1: randomized cube landscape</h2>`,
+    info: `<h2>Level 1: randomized cube landscape using fractal noise</h2>`,
   },
   '2': {
     tab: 'Level 2 · Wave Image',

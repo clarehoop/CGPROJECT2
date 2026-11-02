@@ -12,7 +12,7 @@ Run at https://cg-ocean.vercel.app/
 | Tab | What it shows | Graphics concept |
 | --- | --- | --- |
 | Level 0 | One 2×2×2 cube | Model, view, projection matrices; pinhole camera |
-| Level 1 | Grid of cubes (10 to 400 wide) with random heights and random bottom/top colors, orbiting camera | Translation, scaling, color interpolation, `lookAt` camera path |
+| Level 1 | Grid of cubes (10 to 400 wide) with random heights and random colors, orbiting camera | Translation, scaling, color interpolation, `lookAt` camera path |
 | Level 2 | Color + height sampled from `wave2.png`, cropped to a square (50 to 400 cubes wide) | `getImageData`, box-filter sampling, height mapping |
 | Level 3 | Sea = `wave2.png` heights/colors + a rolling wave made of two cubic Bézier curves; clouds on 3D Bézier paths | Bézier curves, rotation, hierarchical transforms |
 | Level 4 | Lighting, skybox, fog, boat, seagulls, storm, day/night | Blinn-Phong lighting, fog, skybox |
