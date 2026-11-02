@@ -1,11 +1,10 @@
 # Cube World: Ocean in Motion
 
-A seascape built only from cubes with plain WebGL (no three.js). Intro to Computer Graphics, Project 2.
+A seascape built only from cubes with WebGL. CS 5160 Project 2.
 
 ## Running it
 
-The page reads image pixels with `getImageData`, so browsers require it to be served from a web server
-(double-clicking `index.html` will block Level 2). From this folder run:
+Run at https://cg-ocean.vercel.app/
 
 
 ## Levels (tabs at the top of the page)
