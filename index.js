@@ -3,7 +3,7 @@
 // CUBE WORLD: Ocean Waves
 // Built using cube model that is translated and scaled
 //
-// what's in this file (in order):
+// what's in this file:
 //   webgl setup + shaders
 //   the cube model
 //   cubebatch (draws lots of cubes in one draw call)
@@ -29,6 +29,8 @@
 //   [REUSED]  taken from a class example, little or no change
 //   [CHANGED] based on a class example but I changed it
 //   [NEW]     I wrote it for this project
+//   [HELP]    I asked claude (ai) for help with this part, I used its
+//             suggestions as a starting point then tuned and changed them
 // =====================================================================
 
 
@@ -127,6 +129,10 @@ const vertexShaderSource = `
 //
 // [NEW] specular highlights (Blinn-Phong), distance fog, "emissive" for the
 //   sky and sun, and a color tint (grey storm clouds)
+//
+// [HELP] I asked claude to explain blinn-phong and exponential fog and how
+//   to write them in glsl, then I picked the shininess (48) and fog
+//   amounts myself by testing what looked right on the ocean
 //
 const fragmentShaderSource = `
   #ifdef GL_FRAGMENT_PRECISION_HIGH
@@ -830,7 +836,13 @@ function cloudModel(c) {
 
 //   LEVEL 4 - lighting, skybox, fog, boat, seagulls, storm
 //
-//    [NEW] I wrote all of this section for the project
+//    [NEW] all of this section is new for the project
+//
+//    [HELP] I consulted claude while making level 4, mostly to talk through
+//    how to do a skybox with cubes, the day & night sky blending, and the
+//    storm (rain & lightning). I used its suggestions and code as a starting point,
+//    then I tuned the colors, speeds and amounts and fit them into my own
+//    code (cubebatch, setMaterial, the render loop)
 
 const env = {
   fogOn: false,
@@ -902,6 +914,9 @@ const skybox = new CubeBatch(1);
 const sunCube = new CubeBatch(1);
 
 // boat - a few cubes placed relative to the boat (front = +x)
+// [HELP] I asked claude how to build a simple boat out of cubes and how to
+//   make it tilt with the waves (measuring the slope of the sea on each side
+//   of the boat), then I picked the shape and colors myself (the black sail)
 const boat = new CubeBatch(6);
 boat.setCube(0, [0, 0, 0], [4.0, 0.9, 1.7], [0.25, 0.13, 0.06], [0.55, 0.32, 0.15]);           // hull
 boat.setCube(3, [0.5, 0.9, 0], [0.15, 4.5, 0.15], [0.35, 0.2, 0.1], [0.45, 0.28, 0.14]);       // mast
@@ -920,6 +935,11 @@ function boatModel(t) {
 }
 
 // seagulls - fly in circles made from 4 bezier curves
+// [HELP] I asked claude how to make a seagull shape from cubes and how to
+//   make the wings flap, it also pointed me to the 0.5523 number for making
+//   a circle out of bezier curves. I used that with my own bezierPoint and
+//   bezierTangent functions from level 3
+
 // a cubic bezier is really close to a quarter circle if the
 // handles are 0.5523 x radius long
 const gullBody = new CubeBatch(3);
@@ -1187,7 +1207,11 @@ function render(nowMs) {
 //
 //    [NEW] level menu, sliders, switches and the bezier wave editor,
 //    the class examples didn't have any ui
-
+//
+//    [HELP] I consulted claude in the building of my UI, primarily for help with user inputs
+//      for the different levels so that users could play around with my work
+//     I also wanted an "Apple UI" that claude was able to create for me in my CSS
+ 
 function rebuild() {
   buildToken++;
   showStatus('');
