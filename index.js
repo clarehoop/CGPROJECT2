@@ -369,7 +369,7 @@ function multiply(a, b) {
   }
   return r;
 }
-// chain(A, B, C) = A * B * C  (C happens first)
+// chain(a, b, c) = a * b * c  (C happens first)
 function chain(...matrices) { return matrices.reduce(multiply); }
 
 function perspective(fieldOfView, aspect, near, far) {
@@ -446,13 +446,13 @@ function bezierTangent(P, t) {
 
 //   SHARED STATE - the controls in the side panel change these
 
-const WORLD_SIZE = 100;   // landscape is always 100 wide, more cubes = smaller cubes
+const WORLD_SIZE = 100;   // landscape is always 100 wide
 
 const state = {
   level: '0',
   gridN: 50, seed: 7, heightScale: 12,
   imageRes: 100,
-  seaRes: 140, imageSeaScale: 4, waveAmp: 7, waveSpeed: 8, cloudCount: 9, showPaths: false,
+  seaRes: 140, imageSeaScale: 4, waveAmp: 7, waveSpeed: 8, cloudCount: 9,
   lighting: true, fog: true, skybox: true, extras: true, storm: false, sunAngle: 35, dayCycle: false,
   autoOrbit: true, orbitSpeed: 0.15,
 };
@@ -504,73 +504,13 @@ function oceanColor(n, out) {
 // [CHANGED] you can change the grid size (10 to 400) and it always stays
 //   100 wide so spacing = 100 / N, I also added a small gap between cubes
 //   random comes from a seed so "randomize again" works
-//   each cube gets two colors (top and bottom) instead of one to show
-//   interpolation
-//
-// [NEW] heights come from fractal noise instead of plain rand() so it looks
-//   like hills and mountains, and the color comes from the height (water,
-//   sand, grass, rock, snow) with a small random tint on every cube
-
-// value noise - random numbers on a coarse grid, then I blend between the
-// 4 corners around each point so the heights change smoothly
-function makeValueNoise(rand, cells) {
-  const grid = [];
-  for (let k = 0; k < (cells + 1) * (cells + 1); k++) grid.push(rand());
-  const fade = t => t * t * (3 - 2 * t);       // smoothstep so there are no sharp creases
-  return function (u, v) {                     // u, v go from 0 to 1 across the grid
-    const gx = u * cells, gz = v * cells;
-    const ix = Math.min(Math.floor(gx), cells - 1), iz = Math.min(Math.floor(gz), cells - 1);
-    const tx = fade(gx - ix), tz = fade(gz - iz);
-    const at = (a, c) => grid[c * (cells + 1) + a];
-    const top = at(ix, iz) + (at(ix + 1, iz) - at(ix, iz)) * tx;
-    const bot = at(ix, iz + 1) + (at(ix + 1, iz + 1) - at(ix, iz + 1)) * tx;
-    return top + (bot - top) * tz;
-  };
-}
-
-// fractal noise (fbm) - I add 5 layers of value noise, each one has twice
-// the detail and half the height of the one before
-// big layers make the mountains, small layers make the bumpy detail
-function makeFractalNoise(rand) {
-  const layers = [];
-  let cells = 3, amp = 1, total = 0;
-  for (let o = 0; o < 5; o++) {
-    layers.push({ noise: makeValueNoise(rand, cells), amp });
-    total += amp;
-    cells *= 2;
-    amp *= 0.5;
-  }
-  return (u, v) => layers.reduce((sum, l) => sum + l.noise(u, v) * l.amp, 0) / total;
-}
-
-// colors for each height, 0 = lowest and 1 = highest, I blend between them
-const TERRAIN_COLORS = [
-  [0.00, [0.10, 0.30, 0.65]],   // deep water
-  [0.30, [0.25, 0.60, 0.85]],   // shallow water
-  [0.36, [0.90, 0.83, 0.60]],   // sand
-  [0.45, [0.35, 0.68, 0.30]],   // grass
-  [0.65, [0.18, 0.45, 0.20]],   // forest
-  [0.80, [0.50, 0.45, 0.42]],   // rock
-  [0.92, [0.97, 0.97, 1.00]],   // snow
-];
-function terrainColor(h) {
-  for (let k = 1; k < TERRAIN_COLORS.length; k++) {
-    const [h1, c1] = TERRAIN_COLORS[k];
-    if (h <= h1) {
-      const [h0, c0] = TERRAIN_COLORS[k - 1];
-      const t = (h - h0) / (h1 - h0);
-      return c0.map((c, j) => c + (c1[j] - c) * t);
-    }
-  }
-  return TERRAIN_COLORS[TERRAIN_COLORS.length - 1][1];
-}
-
+//   each cube gets two random colors (top and bottom) instead of one to
+//   show interpolation
 function buildRandomGrid() {
   const N = state.gridN;
   const spacing = WORLD_SIZE / N;
   const size = spacing * 0.85;               // small gap so you can see each cube
   const rand = seededRandom(state.seed);     // same seed = same landscape
-  const noise = makeFractalNoise(rand);
   const b = new CubeBatch(N * N);
 
   let i = 0;
@@ -580,19 +520,13 @@ function buildRandomGrid() {
       const x = (col - (N - 1) / 2) * spacing;
       const z = (row - (N - 1) / 2) * spacing;
 
-      // 1b scaling - stretch in y (orthogonal to x-z) by the noise height
-      // the noise is mostly between 0.2 and 0.8 so I stretch it to 0 to 1
-      // u, v don't depend on N so a bigger grid is the same land with more detail
-      const n = noise(col / (N - 1), row / (N - 1));
-      const h = Math.min(Math.max((n - 0.2) / 0.6, 0), 1);
-      const height = 0.3 + h * state.heightScale;
+      // 1b scaling - stretch in y (orthogonal to x-z) by a random amount
+      const height = 0.3 + rand() * state.heightScale;
 
-      // 1c vertex colors - top color from the height plus a small random
-      // tint, bottom is a darker version, the shader blends up each side
-      const base = terrainColor(h);
-      const tint = (rand() - 0.5) * 0.12;
-      const top = base.map(c => Math.min(Math.max(c + tint, 0), 1));
-      const bottom = top.map(c => c * 0.35);
+      // 1c vertex colors - random color on the top 4 corners, darker random
+      // color on the bottom 4, the shader blends between them up each side
+      const top = [rand(), rand(), rand()];
+      const bottom = [rand() * 0.4, rand() * 0.4, rand() * 0.4];
 
       b.setCube(i++, [x, 0, z], [size, height, size], bottom, top);
     }
@@ -608,108 +542,83 @@ function buildRandomGrid() {
 //    [NEW] not in the class examples, I read the pixels with getImageData
 //    (from the w3schools link in the assignment)
 //    everything comes from wave2.png:
-//      color  = pixel colors
-//      height = pixel brightness (the image as grayscale)
+//      color  = pixel colors (colorMap)
+//      height = pixel brightness (heightMap, the image as grayscale)
 
 const IMAGE_SRC = 'wave2.png';
-const pixelCache = {};
+const mapCache = {};
 
-// load the image and read all its pixels once with getImageData
-function loadPixels(src) {
-  if (!pixelCache[src]) {
-    pixelCache[src] = new Promise((resolve, reject) => {
+// draw the image onto a size x size canvas so the browser downsamples it,
+// then read every pixel with getImageData and save a height + color for each
+// wave2.png is 882 x 620 (not square) so I only draw the middle 620 x 620
+// square, that way the picture doesn't get stretched
+function generateMapsFromImage(imageSrc, size) {
+  const key = imageSrc + '@' + size;
+  if (!mapCache[key]) {
+    mapCache[key] = new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
         const c = document.createElement('canvas');
-        c.width = img.naturalWidth;
-        c.height = img.naturalHeight;
+        c.width = size;
+        c.height = size;
         const ctx = c.getContext('2d');
-        ctx.drawImage(img, 0, 0);
+        const side = Math.min(img.width, img.height);
+        const sx = (img.width - side) / 2, sy = (img.height - side) / 2;
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);   // crop + downsample
+        let data;
         try {
-          const data = ctx.getImageData(0, 0, c.width, c.height).data;
-          resolve({ width: c.width, height: c.height, data });
+          data = ctx.getImageData(0, 0, size, size).data;
         } catch (err) {
           reject(new Error('The browser blocked reading the image pixels. Open this page through a local web server (for example VS Code Live Server or "python3 -m http.server"), not by double-clicking the file.'));
+          return;
         }
+
+        const heightMap = [], colorMap = [];
+        for (let y = 0; y < size; y++) {
+          const hRow = [], cRow = [];
+          for (let x = 0; x < size; x++) {
+            const i = (y * size + x) * 4;
+            const r = data[i], g = data[i + 1], b = data[i + 2];
+            hRow.push(0.299 * r + 0.587 * g + 0.114 * b);   // brightness 0-255
+            cRow.push([r / 255, g / 255, b / 255]);          // color 0-1
+          }
+          heightMap.push(hRow);
+          colorMap.push(cRow);
+        }
+        resolve({ N: size, heightMap, colorMap });
       };
-      img.onerror = () => reject(new Error('Could not load ' + src));
-      img.src = src;
+      img.onerror = () => reject(new Error('Failed to load image: ' + imageSrc));
+      img.src = imageSrc;
     });
-    pixelCache[src].catch(() => delete pixelCache[src]);
+    mapCache[key].catch(() => delete mapCache[key]);
   }
-  return pixelCache[src];
-}
-
-// sampling - one cube covers a block of pixels
-// (1000 px image on a 100 cube grid = 10x10 pixels per cube)
-// I average all the pixels in the block (box filter), just picking one
-// pixel looked noisy on detailed images
-function averageBlock(img, u0, v0, u1, v1, out) {
-  const x0 = Math.floor(u0 * img.width), x1 = Math.max(x0 + 1, Math.floor(u1 * img.width));
-  const y0 = Math.floor(v0 * img.height), y1 = Math.max(y0 + 1, Math.floor(v1 * img.height));
-  let r = 0, g = 0, b = 0, count = 0;
-  for (let y = y0; y < y1; y++) {
-    for (let x = x0; x < x1; x++) {
-      const i = (y * img.width + x) * 4;
-      r += img.data[i]; g += img.data[i + 1]; b += img.data[i + 2];
-      count++;
-    }
-  }
-  out[0] = r / count / 255; out[1] = g / count / 255; out[2] = b / count / 255;
-  return out;
-}
-
-// samples the image into an N x N grid. wave2.png is 882 x 620 (not square)
-// so I cropped the middle 620 x 620 square, that way the grid is square and the
-// picture doesn't get stretched. gives back a color and brightness (0-1) per cell
-const sampleCache = {};
-function sampleSquare(img, N) {
-  if (sampleCache[N]) return sampleCache[N];
-  const side = Math.min(img.width, img.height);
-  const uStart = (img.width - side) / 2 / img.width, uSize = side / img.width;
-  const vStart = (img.height - side) / 2 / img.height, vSize = side / img.height;
-  const colors = new Float32Array(N * N * 3);
-  const brightness = new Float32Array(N * N);
-  const c = [0, 0, 0];
-  for (let row = 0; row < N; row++) {
-    for (let col = 0; col < N; col++) {
-      averageBlock(img,
-        uStart + (col / N) * uSize, vStart + (row / N) * vSize,
-        uStart + ((col + 1) / N) * uSize, vStart + ((row + 1) / N) * vSize, c);
-      const i = row * N + col;
-      colors[i * 3] = c[0]; colors[i * 3 + 1] = c[1]; colors[i * 3 + 2] = c[2];
-      // luminance = 0 to 1
-      brightness[i] = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
-    }
-  }
-  return (sampleCache[N] = { N, colors, brightness });
+  return mapCache[key];
 }
 
 async function buildImageTerrain() {
   const token = ++buildToken;
   showStatus('Loading image…');
-  let img;
+  const N = state.imageRes;
+  let maps;
   try {
-    img = await loadPixels(IMAGE_SRC);
+    maps = await generateMapsFromImage(IMAGE_SRC, N);
   } catch (err) {
     if (token === buildToken) showStatus(err.message);
     return;
   }
   if (token !== buildToken) return;   // switched levels while it was loading
 
-  const N = state.imageRes;
-  const { colors, brightness } = sampleSquare(img, N);
+  const { heightMap, colorMap } = maps;
   const spacing = WORLD_SIZE / N;
   const b = new CubeBatch(N * N);
   for (let row = 0; row < N; row++) {
     for (let col = 0; col < N; col++) {
-      const i = row * N + col;
-      const r = colors[i * 3], g = colors[i * 3 + 1], bl = colors[i * 3 + 2];
-      // height mapping - brightness 0-1 (was 0-255) -> actual height
-      const height = 0.3 + brightness[i] * state.heightScale;
+      const [r, g, bl] = colorMap[row][col];
+      // height mapping - brightness 0-255 -> actual height
+      const height = 0.5 + (heightMap[row][col] / 255) * state.heightScale;
       const x = (col - (N - 1) / 2) * spacing;
       const z = (row - (N - 1) / 2) * spacing;
-      b.set(i, x, 0, z, spacing, height, spacing, r * 0.45, g * 0.45, bl * 0.45, r, g, bl, 0);
+      b.set(row * N + col, x, 0, z, spacing, height, spacing, r * 0.45, g * 0.45, bl * 0.45, r, g, bl, 0);
     }
   }
   replaceGround(b);
@@ -788,13 +697,13 @@ function waveHeight(x, z, t, bend = crestBend(z)) {
 }
 
 // still sea surface from wave2.png, brightness -> height
-let seaImage = null;   // { N, colors, brightness } once the image is sampled
+let seaImage = null;   // { N, heightMap, colorMap } once the image is read
 function imageHeightAt(x, z) {
   if (!seaImage) return 0;
   const N = seaImage.N;
   const col = clamp(Math.round((x / WORLD_SIZE + 0.5) * N - 0.5), 0, N - 1);
   const row = clamp(Math.round((z / WORLD_SIZE + 0.5) * N - 0.5), 0, N - 1);
-  return seaImage.brightness[row * N + col] * state.imageSeaScale;
+  return (seaImage.heightMap[row][col] / 255) * state.imageSeaScale;
 }
 
 // sea height = image height + bezier wave on top
@@ -805,12 +714,12 @@ function seaHeight(x, z, t) {
 async function loadSeaImage() {
   const N = state.seaRes;
   try {
-    const img = await loadPixels(IMAGE_SRC);
+    const maps = await generateMapsFromImage(IMAGE_SRC, N);
     if (state.seaRes !== N) return;   // resolution changed while loading
-    seaImage = sampleSquare(img, N);
+    seaImage = maps;
     // color the far ocean with the image's average color, a bit darker
     const avg = [0, 0, 0];
-    for (let i = 0; i < N * N; i++) for (let k = 0; k < 3; k++) avg[k] += seaImage.colors[i * 3 + k] / (N * N);
+    for (const row of seaImage.colorMap) for (const c of row) for (let k = 0; k < 3; k++) avg[k] += c[k] / (N * N);
     oceanFloor.setCube(0, [0, -0.5, 0], [3000, 1, 3000], avg.map((v) => v * 0.6), avg.map((v) => v * 0.75));
   } catch (err) {
     showStatus(err.message);
@@ -823,7 +732,7 @@ function buildSea() {
   sea = new CubeBatch(state.seaRes * state.seaRes);
 }
 
-// every frame I re-scale every sea cube to the wave height
+// every frame i change the sea cubes to the wave height
 const tmpColor = [0, 0, 0];
 function updateSea(t) {
   const N = state.seaRes;
@@ -839,11 +748,11 @@ function updateSea(t) {
       const wave = waveHeight(x, z, t, bend);
       const n = clamp(wave / (amp * 1.15), 0, 1);   // 0 = trough, 1 = crest
 
-      // color + still height from the image (blue colors until it loads)
+      // color height from the image (blue colors until it loads)
       let r, g, b, imgH = 0;
       if (img) {
-        r = img.colors[i * 3]; g = img.colors[i * 3 + 1]; b = img.colors[i * 3 + 2];
-        imgH = img.brightness[i] * state.imageSeaScale;
+        [r, g, b] = img.colorMap[row][col];
+        imgH = (img.heightMap[row][col] / 255) * state.imageSeaScale;
       } else {
         oceanColor(n, tmpColor);
         r = tmpColor[0]; g = tmpColor[1]; b = tmpColor[2];
@@ -867,7 +776,6 @@ oceanFloor.setCube(0, [0, -0.5, 0], [3000, 1, 3000], DEEP, DEEP);
 
 // clouds that move along 3d bezier paths
 let clouds = [];
-let cloudPathMarkers = null;
 
 function makeCloud(rand) {
   // each cloud is 5-10 cubes that are scaled, rotated and translated
@@ -898,20 +806,6 @@ function buildClouds() {
   const rand = seededRandom(1234);
   clouds = [];
   for (let i = 0; i < state.cloudCount; i++) clouds.push(makeCloud(rand));
-
-  // little markers along each path for the "show paths" switch
-  if (cloudPathMarkers) cloudPathMarkers.dispose();
-  const SAMPLES = 40;
-  cloudPathMarkers = new CubeBatch(Math.max(1, clouds.length * (SAMPLES + 4)));
-  cloudPathMarkers.count = clouds.length * (SAMPLES + 4);
-  let i = 0;
-  for (const c of clouds) {
-    for (let s = 0; s < SAMPLES; s++) {
-      const p = bezierPoint(c.path, s / (SAMPLES - 1));
-      cloudPathMarkers.setCube(i++, p, [0.6, 0.6, 0.6], [1, 0.85, 0.2]);
-    }
-    for (const p of c.path) cloudPathMarkers.setCube(i++, [p[0], p[1] - 1, p[2]], [2, 2, 2], [1, 0.3, 0.3]);
-  }
 }
 
 function updateClouds(dt) {
@@ -1010,10 +904,8 @@ const sunCube = new CubeBatch(1);
 // boat - a few cubes placed relative to the boat (front = +x)
 const boat = new CubeBatch(6);
 boat.setCube(0, [0, 0, 0], [4.0, 0.9, 1.7], [0.25, 0.13, 0.06], [0.55, 0.32, 0.15]);           // hull
-boat.setCube(1, [2.3, 0.15, 0], [1.0, 0.75, 1.1], [0.25, 0.13, 0.06], [0.55, 0.32, 0.15]);     // bow     // cabin
 boat.setCube(3, [0.5, 0.9, 0], [0.15, 4.5, 0.15], [0.35, 0.2, 0.1], [0.45, 0.28, 0.14]);       // mast
-boat.setCube(4, [1.25, 1.5, 0], [1.3, 3.4, 0.08], [0.04, 0.04, 0.05], [0.12, 0.12, 0.14]);              // sail
-boat.setCube(5, [0.85, 5.0, 0], [0.6, 0.4, 0.05], [0.9, 0.15, 0.15], [1, 0.25, 0.2]);         // flag
+boat.setCube(4, [1.25, 1.5, 0], [1.3, 3.4, 0.08], [0.04, 0.04, 0.05], [0.12, 0.12, 0.14]);     // black sail to emulate a pirate ship
 let boatPitch = 0, boatRoll = 0;
 
 function boatModel(t) {
@@ -1149,9 +1041,9 @@ const LEVELS = {
     info: `<h2>Level 0: a single cube</h2>`,
   },
   '1': {
-    tab: 'Level 1 · Randomized terrain',
+    tab: 'Level 1 · Randomized color and height grid',
     camera: { radius: 115, pitch: 0.5, target: [0, 2, 0], minR: 10, maxR: 400 },
-    info: `<h2>Level 1: randomized cube landscape using fractal noise</h2>`,
+    info: `<h2>Level 1: randomized cube landscape</h2>`,
   },
   '2': {
     tab: 'Level 2 · Wave Image',
@@ -1259,7 +1151,6 @@ function render(nowMs) {
     const cloudTint = full && state.storm ? [0.45, 0.47, 0.52] : [1, 1, 1];
     setMaterial({ tint: cloudTint });
     for (const c of clouds) drawBatch(c.puffs, cloudModel(c));
-    if (state.showPaths) { setMaterial({ emissive: 1, fog: false }); drawBatch(cloudPathMarkers); }
 
     if (full && state.extras) {
       setMaterial({ specular: 0.3 });
